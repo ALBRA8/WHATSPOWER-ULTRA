@@ -68,6 +68,27 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS tracked_link_clicks (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      contact_phone TEXT,
+      user_agent TEXT,
+      ip TEXT,
+      clicked_at INTEGER NOT NULL,
+      FOREIGN KEY (code) REFERENCES tracked_links(code)
+    );
+
+    CREATE TABLE IF NOT EXISTS realtime_leads (
+      id TEXT PRIMARY KEY,
+      phone TEXT NOT NULL,
+      name TEXT,
+      source TEXT NOT NULL, -- 'facebook_ads' | 'tiktok_ads' | 'typeform' | 'custom_webhook'
+      campaign_id TEXT,
+      payload_json TEXT,
+      processed INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_items_campaign ON campaign_items(campaign_id, status);
   `)
 

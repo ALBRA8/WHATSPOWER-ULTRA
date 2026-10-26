@@ -1,4 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { createBroadcastDatabase } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
@@ -7,6 +8,8 @@ import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionCh
 import { renderCampaignStudioHtml } from './studio/campaign-studio-html.ts'
 import { renderSpintax } from './engine/spintax.ts'
 import { parseAudienceCsv } from './audiences/csv-importer.ts'
+import { WebhookLeadIngester } from './audiences/webhook-ingest.ts'
+import { MetaCloudDispatcher } from './adapters/meta-cloud-dispatcher.ts'
 
 export function createBroadcastServer(options?: {
   dbPath?: string
@@ -14,10 +17,16 @@ export function createBroadcastServer(options?: {
   lockChecker?: any
   suppressionStore?: any
   whatsPowerEnabled?: boolean
+  useMetaCloudApi?: boolean
 }) {
   const whatsPowerEnabled = options?.whatsPowerEnabled ?? (process.env.WHATSPOWER_ENABLED !== 'false')
   const db = createBroadcastDatabase(options?.dbPath)
-  const dispatcher = options?.dispatcher || new HttpCrmDaemonDispatcher({ allowRealDispatch: false })
+  const leadIngester = new WebhookLeadIngester(db)
+  const dispatcher =
+    options?.dispatcher ||
+    (options?.useMetaCloudApi || process.env.TRANSPORT_ENGINE === 'meta_cloud'
+      ? new MetaCloudDispatcher()
+      : new HttpCrmDaemonDispatcher({ allowRealDispatch: false }))
   const lockChecker = options?.lockChecker || (whatsPowerEnabled ? new Http2ALockChecker({ enabled: true }) : new StandaloneLockChecker())
   const suppressionStore =
     options?.suppressionStore ||
@@ -169,12 +178,25 @@ export function createBroadcastServer(options?: {
       return
     }
 
-    // 8. Enlaces Rastreados (/t/:code)
+    // 8. Enlaces Rastreados y Atribución (/t/:code)
     if (req.method === 'GET' && url.pathname.startsWith('/t/')) {
       const code = url.pathname.replace('/t/', '')
-      const row = db.prepare('SELECT target_url FROM tracked_links WHERE code = ?').get(code) as any
+      const contactPhone = url.searchParams.get('p') || null
+      const userAgent = req.headers['user-agent'] || null
+      const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1'
+
+      const row = db.prepare('SELECT target_url, campaign_id FROM tracked_links WHERE code = ?').get(code) as any
       if (row && row.target_url) {
         db.prepare('UPDATE tracked_links SET clicks = clicks + 1 WHERE code = ?').run(code)
+        
+        // Registrar evento individual para heatmap y atribución
+        try {
+          db.prepare(`
+            INSERT INTO tracked_link_clicks (id, code, contact_phone, user_agent, ip, clicked_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).run(`clk_${randomUUID()}`, code, contactPhone, userAgent, ip, Math.floor(Date.now() / 1000))
+        } catch {}
+
         res.writeHead(302, { Location: row.target_url })
         res.end()
         return
@@ -184,11 +206,55 @@ export function createBroadcastServer(options?: {
       return
     }
 
+    // 9. Ingesta de Leads en Tiempo Real (Facebook/TikTok Ads, Typeform, Webhooks)
+    if (req.method === 'POST' && url.pathname === '/api/audiences/webhook-lead') {
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body)
+          const result = leadIngester.ingestLead(payload)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (e: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+      return
+    }
+
+    // 10. Reporte de Atribución y Clics de Campaña
+    if (req.method === 'GET' && url.pathname.startsWith('/api/attribution/report/')) {
+      const campaignId = url.pathname.replace('/api/attribution/report/', '')
+      const campaign = engine.getCampaign(campaignId)
+      if (!campaign) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
+        return
+      }
+
+      const linkRows = db.prepare('SELECT * FROM tracked_links WHERE campaign_id = ?').all(campaignId) as any[]
+      const totalClicks = linkRows.reduce((sum, r) => sum + (r.clicks || 0), 0)
+      const ctr = campaign.sentCount > 0 ? ((totalClicks / campaign.sentCount) * 100).toFixed(1) : '0.0'
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        campaignId,
+        campaignName: campaign.name,
+        sentCount: campaign.sentCount,
+        totalClicks,
+        ctrPercent: `${ctr}%`,
+        links: linkRows,
+      }))
+      return
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Ruta no encontrada' }))
   })
 
-  return { server, db, engine }
+  return { server, db, engine, leadIngester, dispatcher }
 }
 
 // Auto-arranque si se ejecuta directamente con Node

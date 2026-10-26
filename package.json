@@ -6,6 +6,6 @@
   "description": "WHATSPOWER ULTRA (Nivel 3) — Suite de Difusión Masiva, Chat Marketing y Anti-Ban para CRM ALBRA",
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
-    "test": "node --experimental-strip-types --test tests/whatson-exhaustive.test.ts tests/plug-and-play.test.ts tests/suite.test.ts tests/contracts-integration.test.ts"
+    "test": "node --experimental-strip-types --test tests/superpowers-level3.test.ts tests/whatson-exhaustive.test.ts tests/plug-and-play.test.ts tests/suite.test.ts tests/contracts-integration.test.ts"
   }
 }
