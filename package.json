@@ -1,0 +1,11 @@
+{
+  "name": "whatspower-ultra",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WHATSPOWER ULTRA (Nivel 3) — Suite de Difusión Masiva, Chat Marketing y Anti-Ban para CRM ALBRA",
+  "scripts": {
+    "start": "node --experimental-strip-types src/server.ts",
+    "test": "node --experimental-strip-types --test tests/whatson-exhaustive.test.ts tests/plug-and-play.test.ts tests/suite.test.ts tests/contracts-integration.test.ts"
+  }
+}
