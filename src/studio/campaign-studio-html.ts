@@ -113,6 +113,30 @@ export function renderCampaignStudioHtml(): string {
           <input id="cmpName" placeholder="Ej. Lanzamiento Black Friday - Segmento VIP" value="Campaña WhatsPower Ultra 01">
         </div>
 
+        <!-- Neuromarketing AI Copilot -->
+        <div style="background:#132338; border:1px solid #1e40af; border-radius:8px; padding:12px; margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <strong style="color:#60a5fa; font-size:12px;">🧠 Copiloto de Neuromarketing & Ventas IA (360°)</strong>
+            <span style="font-size:10px; background:#1e3a8a; color:#93c5fd; padding:2px 6px; border-radius:4px;">Hofstede + Zaltman + Rapaille</span>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:6px;">
+            <select id="neuroCountry" style="flex:1; font-size:11px; padding:6px;">
+              <option value="COLOMBIA">🇨🇴 Colombia (Colectivismo + Confianza)</option>
+              <option value="MEXICO">🇲🇽 México (Estatus + Respaldo)</option>
+              <option value="ARGENTINA">🇦🇷 Argentina (ROI Concreto + Crítico)</option>
+              <option value="CHILE">🇨🇱 Chile (Calidad + Estabilidad)</option>
+              <option value="ESPANA">🇪🇸 España (Claridad + Profesionalismo)</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:6px;">
+            <input id="neuroBenefit" style="flex:1; font-size:11px; padding:6px;" placeholder="Beneficio Principal (Ej: cerrar 3x más ventas)" value="cerrar 3x más ventas sin contratar más personal">
+            <input id="neuroPain" style="flex:1; font-size:11px; padding:6px;" placeholder="Dolor / Miedo (Ej: perder prospectos)" value="perder clientes por no responder de inmediato">
+          </div>
+          <button class="btn btn-primary" style="width:100%; font-size:11px; padding:6px;" onclick="generateNeuroSpintax()">
+            ⚡ Redactar Spintax Persuasivo con Neuromarketing
+          </button>
+        </div>
+
         <div class="form-group">
           <label>Plantilla con Spintax {A|B|C} y Variables {{nombre}}</label>
           <textarea id="cmpTemplate" rows="4">{¡Hola|Buen día|Estimado/a} {{nombre}}! {Tenemos una novedad para ti|Queremos compartirte esta oportunidad exclusiva}: mira los detalles aquí: https://albra.co/oferta</textarea>
@@ -236,6 +260,28 @@ export function renderCampaignStudioHtml(): string {
   <script>
     let activeCampaignId = null;
     let pollInterval = null;
+
+    async function generateNeuroSpintax() {
+      const productName = document.getElementById('cmpName').value || 'Nuestra Solución';
+      const country = document.getElementById('neuroCountry').value;
+      const benefit = document.getElementById('neuroBenefit').value;
+      const pain = document.getElementById('neuroPain').value;
+
+      try {
+        const res = await fetch('/api/ai/neuromarketing/generate-spintax', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productName, country, mainBenefit: benefit, painPoint: pain })
+        });
+        const data = await res.json();
+        if (data.spintaxTemplate) {
+          document.getElementById('cmpTemplate').value = data.spintaxTemplate;
+          testSpintax();
+        }
+      } catch(e) {
+        alert('Error al generar Spintax: ' + e.message);
+      }
+    }
 
     async function testSpintax() {
       const template = document.getElementById('cmpTemplate').value;

@@ -10,6 +10,7 @@ import { renderSpintax } from './engine/spintax.ts'
 import { parseAudienceCsv } from './audiences/csv-importer.ts'
 import { WebhookLeadIngester } from './audiences/webhook-ingest.ts'
 import { MetaCloudDispatcher } from './adapters/meta-cloud-dispatcher.ts'
+import { NeuromarketingEngine } from './ai/neuromarketing-engine.ts'
 
 export function createBroadcastServer(options?: {
   dbPath?: string
@@ -22,6 +23,7 @@ export function createBroadcastServer(options?: {
   const whatsPowerEnabled = options?.whatsPowerEnabled ?? (process.env.WHATSPOWER_ENABLED !== 'false')
   const db = createBroadcastDatabase(options?.dbPath)
   const leadIngester = new WebhookLeadIngester(db)
+  const neuromarketingEngine = new NeuromarketingEngine()
   const dispatcher =
     options?.dispatcher ||
     (options?.useMetaCloudApi || process.env.TRANSPORT_ENGINE === 'meta_cloud'
@@ -250,11 +252,65 @@ export function createBroadcastServer(options?: {
       return
     }
 
+    // 11. Neuromarketing AI: Análisis de Mercado y Perfil Subconsciente
+    if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/analyze') {
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body)
+          const result = neuromarketingEngine.analyzeTargetMarket(payload)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (e: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+      return
+    }
+
+    // 12. Neuromarketing AI: Generación Automática de Spintax Persuasivo
+    if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/generate-spintax') {
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body)
+          const result = neuromarketingEngine.generateNeuromarketingSpintax(payload)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (e: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+      return
+    }
+
+    // 13. Neuromarketing AI: Constructor de Master Prompt 360° para LLMs
+    if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/master-prompt') {
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body)
+          const prompt = neuromarketingEngine.buildMasterPrompt(payload)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ masterPrompt: prompt }))
+        } catch (e: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+      return
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Ruta no encontrada' }))
   })
 
-  return { server, db, engine, leadIngester, dispatcher }
+  return { server, db, engine, leadIngester, dispatcher, neuromarketingEngine }
 }
 
 // Auto-arranque si se ejecuta directamente con Node
