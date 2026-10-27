@@ -32,12 +32,13 @@ describe('PLUG-AND-PLAY MODULARITY TESTS (ALBRA 3 Tiers)', () => {
     assert.strictEqual(campaign.status, 'DRAFT')
     assert.strictEqual(campaign.totalTargets, 2)
 
-    // Procesar los dos envíos secuencialmente
-    const step1 = await engine.processNextItem(campaign.id)
+    // Procesar los dos envíos secuencialmente (businessDate fija: evita flaky nocturno por guard de horario)
+    const businessDate = new Date('2026-10-24T10:00:00-05:00') // 10:00 AM hora Bogotá
+    const step1 = await engine.processNextItem(campaign.id, businessDate)
     assert.strictEqual(step1.processed, true)
     assert.strictEqual(step1.status, 'SENT')
 
-    const step2 = await engine.processNextItem(campaign.id)
+    const step2 = await engine.processNextItem(campaign.id, businessDate)
     assert.strictEqual(step2.processed, true)
     assert.strictEqual(step2.status, 'SENT')
 
@@ -47,7 +48,7 @@ describe('PLUG-AND-PLAY MODULARITY TESTS (ALBRA 3 Tiers)', () => {
     assert.strictEqual(mockDispatcher.dispatched[1].to, '573009998877')
 
     // Paso final: campaña completada
-    const stepFinal = await engine.processNextItem(campaign.id)
+    const stepFinal = await engine.processNextItem(campaign.id, businessDate)
     assert.strictEqual(stepFinal.processed, false)
     assert.strictEqual(stepFinal.status, 'COMPLETED')
     
