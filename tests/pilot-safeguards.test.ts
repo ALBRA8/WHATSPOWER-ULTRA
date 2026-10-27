@@ -12,7 +12,12 @@ async function runPilotSafeguardsSuite() {
   console.log('============================================================\n')
 
   const TEST_2A_URL = 'http://localhost:3003'
-  const validSecret = process.env.INTERNAL_API_SECRET || 'crm_albra_internal_secret_key_fixed_length_for_daemon_2026'
+  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas
+  const validSecret = process.env.INTERNAL_API_SECRET
+  if (!validSecret) {
+    console.error('FAIL-CLOSED: INTERNAL_API_SECRET ausente. Abortando suite.')
+    process.exit(1)
+  }
   const TEST_PHONE = '573999111222'
 
   let passed = 0

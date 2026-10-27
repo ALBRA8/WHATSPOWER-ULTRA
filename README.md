@@ -59,7 +59,7 @@ Variables clave:
 ```ini
 PORT=3004
 WHATSAPP_DAEMON_URL=http://localhost:3002
-INTERNAL_API_SECRET=crm_albra_internal_secret_key_fixed_length_for_daemon_2026
+INTERNAL_API_SECRET=<secreto-compartido-minimo-24-caracteres>  # generar valor propio; nunca reutilizar valores publicados
 AGENTIC_2A_URL=http://localhost:3003
 WHATSPOWER_ENABLED=true    # true para Suite Completa, false para Standalone con solo CRM
 ALLOW_REAL_DISPATCH=false  # Salvaguarda física: false para simulación, true solo en producción autorizada

@@ -9,7 +9,12 @@ async function executeSingleSupervisedPilot() {
 
   const TARGET_PHONE = '573017543786'
   const EXACT_TEXT = 'Tengo estos zapatos para la venta.'
-  const DAEMON_SECRET = process.env.INTERNAL_API_SECRET || 'crm_albra_internal_secret_key_fixed_length_for_daemon_2026'
+  // FAIL-CLOSED (rotación 2026-10-27): sin secret válido no se despacha (paridad con el gate del daemon :3002)
+  const DAEMON_SECRET = process.env.INTERNAL_API_SECRET
+  if (!DAEMON_SECRET || DAEMON_SECRET.length < 24) {
+    console.error('FAIL-CLOSED: INTERNAL_API_SECRET ausente o <24 caracteres. Abortando.')
+    process.exit(1)
+  }
 
   console.log(`[Paso 1] Destinatario validado: ${TARGET_PHONE}`)
   console.log(`[Paso 1] Mensaje exacto: "${EXACT_TEXT}"`)

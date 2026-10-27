@@ -12,7 +12,12 @@ async function runBajasCircuitTest() {
   console.log('============================================================\n')
 
   const TEST_PHONE = '573999888777'
-  const secret = process.env.INTERNAL_API_SECRET || 'crm_albra_internal_secret_key_fixed_length_for_daemon_2026'
+  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas
+  const secret = process.env.INTERNAL_API_SECRET
+  if (!secret) {
+    console.error('FAIL-CLOSED: INTERNAL_API_SECRET ausente. Abortando suite.')
+    process.exit(1)
+  }
 
   // Limpieza inicial por si acaso
   await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`, {
