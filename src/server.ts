@@ -75,7 +75,9 @@ export function createBroadcastServer(options?: {
           const { template, name, variables } = JSON.parse(body)
           const rendered = renderSpintax(template || '', {
             seed: String(Math.random()),
-            variables: { nombre: name || 'Juan', ...(variables || {}) },
+            // Alias name/nombre: el Studio usa {{nombre}} y el CSV usa {{name}};
+            // el preview debe reflejar lo mismo que inyectará el despacho real.
+            variables: { name: name || 'Juan', nombre: name || 'Juan', ...(variables || {}) },
           })
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ rendered }))

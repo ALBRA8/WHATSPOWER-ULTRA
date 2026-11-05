@@ -77,3 +77,14 @@ Abrir en el navegador:
 npm test
 ```
 Ejecuta la suite de pruebas unitarias, de paridad WhatsOn, contratos y modularidad plug-and-play.
+
+Pruebas E2E de integración (requieren la Capa 2A viva en `:3003` y el secreto interno en `.env`):
+```bash
+npm run test:e2e
+```
+Incluye las salvaguardas pre-piloto (6 checks: fail-closed, 401, UNCERTAIN_DISPATCH aislado, arranque limpio) y el circuito completo de bajas CRM → 2A → 2B con 0 envíos reales.
+
+Smoke contra servicios vivos (modo simulación, 0 envíos reales, limpieza propia):
+```bash
+node scripts/smoke-live.mjs
+```

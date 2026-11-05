@@ -290,7 +290,11 @@ export class BroadcastEngine {
     // E. Generación determinista de Spintax con semilla por contacto
     const seed = `${campaignId}_${phone}`
     const variables: Record<string, string> = nextItem.variables_json ? JSON.parse(nextItem.variables_json) : {}
-    if (nextItem.contact_name) variables.name = nextItem.contact_name
+    if (nextItem.contact_name) {
+      variables.name = nextItem.contact_name
+      // Alias: las plantillas del Campaign Studio usan {{nombre}} (el CSV usa {{name}})
+      if (!variables.nombre) variables.nombre = nextItem.contact_name
+    }
 
     const renderedText = renderSpintax(campaign.templateSpintax, { seed, variables })
 

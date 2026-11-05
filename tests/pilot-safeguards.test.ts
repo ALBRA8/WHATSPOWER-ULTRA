@@ -12,10 +12,11 @@ async function runPilotSafeguardsSuite() {
   console.log('============================================================\n')
 
   const TEST_2A_URL = 'http://localhost:3003'
-  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas
-  const validSecret = process.env.INTERNAL_API_SECRET
+  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas.
+  // Este suite habla con la Capa 2A (:3003), por lo que usa el secreto interno de 2A.
+  const validSecret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET
   if (!validSecret) {
-    console.error('FAIL-CLOSED: INTERNAL_API_SECRET ausente. Abortando suite.')
+    console.error('FAIL-CLOSED: AGENTIC_2A_INTERNAL_SECRET ausente. Abortando suite.')
     process.exit(1)
   }
   const TEST_PHONE = '573999111222'
@@ -124,10 +125,14 @@ async function runPilotSafeguardsSuite() {
   // --------------------------------------------------------------------------
   {
     // 5.1 Validar que la configuración del piloto rechaza ejecución
+    // Nota: el gate innegociable es la autorización explícita del operador
+    // (PILOT_NOT_AUTHORIZED). El blocker OPERATOR_PHONE_MISSING solo aparece
+    // si operatorPhoneCanonical es null; la config del piloto ya trae el número
+    // fijado, por lo que no debe exigirse aquí.
     const checkPilot = validatePilotPreconditions(PILOT_SUPERVISED_CONFIG)
     assert.strictEqual(checkPilot.canExecute, false)
+    assert.ok(checkPilot.blockers.length >= 1, 'Debe existir al menos un blocker de salvaguarda')
     assert.ok(checkPilot.blockers.some((b) => b.includes('PILOT_NOT_AUTHORIZED')))
-    assert.ok(checkPilot.blockers.some((b) => b.includes('OPERATOR_PHONE_MISSING')))
 
     // 5.2 Si se crea una campaña en BD, permanece inactiva sin bucle de despacho autónomo
     const db = createBroadcastDatabase(':memory:')

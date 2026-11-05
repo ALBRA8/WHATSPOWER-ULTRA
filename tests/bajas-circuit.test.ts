@@ -2,7 +2,32 @@ import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { Http2ASuppressionChecker, CompositeSuppressionChecker, LocalSuppressionStore } from '../src/safety/suppression.ts'
-import { registerSuppressionInAgentic2A } from '../../../audit_repos/CRM-ALBRA/src/lib/agentic-2a-bridge.ts'
+
+/**
+ * Registro de baja en la Capa 2A (WHATSPOWER :3003) vía HTTP autenticado interno.
+ * Sustituye al antiguo bridge cross-repo (import con ruta absoluta de otra máquina);
+ * el contrato es el mismo: POST /api/internal/suppression/:phone con Bearer + { reason }.
+ */
+async function registerSuppressionInAgentic2A(phone: string, reason: string): Promise<{ success: boolean }> {
+  const secret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET
+  if (!secret) {
+    throw new Error('FAIL-CLOSED: AGENTIC_2A_INTERNAL_SECRET ausente')
+  }
+  const res = await fetch(`http://localhost:3003/api/internal/suppression/${encodeURIComponent(phone)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${secret}`,
+    },
+    body: JSON.stringify({ reason }),
+    signal: AbortSignal.timeout(5000),
+  })
+  if (!res.ok) {
+    return { success: false }
+  }
+  const data = await res.json() as { suppressed?: boolean }
+  return { success: data.suppressed === true }
+}
 
 async function runBajasCircuitTest() {
   console.log('\n============================================================')
@@ -12,10 +37,11 @@ async function runBajasCircuitTest() {
   console.log('============================================================\n')
 
   const TEST_PHONE = '573999888777'
-  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas
-  const secret = process.env.INTERNAL_API_SECRET
+  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas.
+  // Habla con la Capa 2A (:3003), por lo que usa el secreto interno de 2A.
+  const secret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET
   if (!secret) {
-    console.error('FAIL-CLOSED: INTERNAL_API_SECRET ausente. Abortando suite.')
+    console.error('FAIL-CLOSED: AGENTIC_2A_INTERNAL_SECRET ausente. Abortando suite.')
     process.exit(1)
   }
 
