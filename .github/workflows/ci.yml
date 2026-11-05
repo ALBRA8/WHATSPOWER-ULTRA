@@ -1,0 +1,24 @@
+name: CI WHATSPOWER-ULTRA
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: TypeScript (fail-fast)
+        run: npx --yes typescript@5 tsc --noEmit -p tsconfig.json
+      - name: Suite completa (incluye seguridad AUTH/ORG/OWN/WH/TR/ENV)
+        run: npm test
+        env:
+          NODE_ENV: test
+          # El suite de seguridad define sus propias identidades de prueba;
+          # esta clave evita el fail-closed 503 en cualquier test que la necesite.
+          ADMIN_API_KEYS: ci-only-ultra-admin-key-0000000000:org_ci
