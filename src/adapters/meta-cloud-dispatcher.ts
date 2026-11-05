@@ -28,13 +28,22 @@ export class MetaCloudDispatcher implements Dispatcher {
   async dispatch(to: string, text: string): Promise<DispatchResult> {
     const formattedPhone = to.replace(/\D/g, '')
 
-    // Si opera en modo simulación (Sala Limpia)
+    // Modo simulación (Sala Limpia): NO envía nada real, permitido sin salvaguarda
     if (this.mockMode) {
       const messageId = `wamid.HBgL${Date.now()}${Math.random().toString(36).substring(2, 7)}`
       this.dispatchedMessages.push({ to: formattedPhone, text, messageId, timestamp: Date.now() })
       return {
         success: true,
         messageId,
+      }
+    }
+
+    // SALVAGUARDA DURA (orden de cierre 2026-11-06): NINGÚN envío real sale por Meta Cloud
+    // sin ALLOW_REAL_DISPATCH=true, INDEPENDIENTEMENTE de la configuración. Fail-closed.
+    if (process.env.ALLOW_REAL_DISPATCH !== 'true') {
+      return {
+        success: false,
+        error: 'DISPATCH_BLOCKED_BY_SAFETY_GUARD: envío real vía Meta Cloud bloqueado — ALLOW_REAL_DISPATCH no está en true (fail-closed)',
       }
     }
 

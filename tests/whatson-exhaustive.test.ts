@@ -126,6 +126,10 @@ invalido123,Descartado`
   // WO-06: Servidor Web Campaign Studio
   // -------------------------------------------------------------
   await t.test('WO-06: Servidor HTTP sirve Campaign Studio y endpoints de monitor', async () => {
+    // Orden de cierre 2026-11-06: las rutas /api/* exigen identidad administrativa
+    // (asignación incondicional: el .env del repo puede traer claves de producción)
+    process.env.ADMIN_API_KEYS = 'ultra_wo06_test_key_00000000000'
+    const AUTH = { 'Authorization': `Bearer ${process.env.ADMIN_API_KEYS}` }
     const { server } = createBroadcastServer({ dbPath: ':memory:', dispatcher, lockChecker })
     await new Promise<void>((resolve) => server.listen(3019, () => resolve()))
 
@@ -137,20 +141,20 @@ invalido123,Descartado`
       assert.ok(html.includes('WhatsPower-Ultra Campaign Studio'))
       assert.ok(html.includes('Escudo Anti-Ban'))
 
-      // 2. POST /api/spintax/preview
+      // 2. POST /api/spintax/preview (autenticado)
       const resSpintax = await fetch('http://localhost:3019/api/spintax/preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AUTH },
         body: JSON.stringify({ template: '{Hola|Saludos} {{nombre}}', name: 'Laura' }),
       })
       assert.strictEqual(resSpintax.status, 200)
       const dataSpintax = await resSpintax.json()
       assert.ok(dataSpintax.rendered.includes('Laura'))
 
-      // 3. POST /api/audiences/preview-csv
+      // 3. POST /api/audiences/preview-csv (autenticado)
       const resCsv = await fetch('http://localhost:3019/api/audiences/preview-csv', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AUTH },
         body: JSON.stringify({ csvContent: 'phone,name\n3001234567,Test' }),
       })
       assert.strictEqual(resCsv.status, 200)

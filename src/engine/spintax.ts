@@ -44,7 +44,9 @@ export function renderSpintax(
   // 1. Reemplazo de variables {{name}}, {{var}}, etc.
   if (options?.variables) {
     for (const [key, val] of Object.entries(options.variables)) {
-      const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi')
+      // La clave viene de fuentes externas (CSV/webhook): escaparla evita inyección de RegExp/ReDoS
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const regex = new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, 'gi')
       result = result.replace(regex, val || '')
     }
   }

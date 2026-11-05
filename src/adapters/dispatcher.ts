@@ -28,11 +28,13 @@ export class HttpCrmDaemonDispatcher implements Dispatcher {
   }
 
   async dispatch(to: string, text: string): Promise<DispatchResult> {
-    // Salvaguarda física: si no se autoriza explícitamente el envío real, bloquear
-    if (!this.allowRealDispatch && this.endpointUrl.includes(':3002')) {
+    // SALVAGUARDA FÍSICA (orden de cierre 2026-11-06): si no se autoriza explícitamente el
+    // envío real, BLOQUEAR SIEMPRE — la condición anterior por substring ':3002' era
+    // bypasseable cambiando el host/puerto del daemon.
+    if (!this.allowRealDispatch) {
       return {
         success: false,
-        error: 'DISPATCH_BLOCKED_BY_SAFETY_GUARD: Despacho a puerto real 3002 bloqueado en modo seguro',
+        error: 'DISPATCH_BLOCKED_BY_SAFETY_GUARD: envío real bloqueado — allowRealDispatch no está autorizado (fail-closed)',
       }
     }
 
