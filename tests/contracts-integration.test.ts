@@ -139,6 +139,11 @@ async function runContractsIntegrationSuite() {
     let simulateTimeout = false
     /** (tercera reparación 5.A) Simular servidor 2A con contrato viejo (sin eco de org) */
     let simulateLegacyNoEcho = false
+    // CUARTA FASE: credenciales del mock — la org dedicada EXIGE su clave
+    const KEY_DEDICADA = 'clave_dedicada_org_alpha_min16'
+    const ORG_DEDICADA = 'org_alpha'
+    process.env.INTERNAL_API_SECRET = 'secreto_compartido_tests_min16chars'
+    delete process.env.AGENTIC_2A_KEYS
 
     // Mock 2A con el CONTRATO VIGENTE: exige X-Org-Id y hace eco de la organización
     const mock2AServer = createServer((req, res) => {
@@ -155,6 +160,21 @@ async function runContractsIntegrationSuite() {
         // Contrato vigente de Capa 2A: sin X-Org-Id → 400
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'x-org-id requerido (aislamiento multi-organización)' }))
+        return
+      }
+
+      // CUARTA FASE (contrato v3): 2A exige Bearer y aplica identidad por
+      // organización — las orgs CON clave dedicada rechazan el secreto global.
+      const bearer = String(req.headers['authorization'] || '').replace(/^Bearer /, '')
+      const dedicated: Record<string, string> = { [ORG_DEDICADA]: KEY_DEDICADA }
+      if (!bearer) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
+        return
+      }
+      if (dedicated[orgHeader] && bearer !== dedicated[orgHeader]) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'ORG_HAS_DEDICATED_KEY: esta organización exige su clave dedicada' }))
         return
       }
 
@@ -201,6 +221,9 @@ async function runContractsIntegrationSuite() {
       })
       const ORG_A = 'org_alpha'
       const ORG_B = 'org_beta'
+      // CUARTA FASE: org_alpha TIENE clave dedicada (contrato v3) — el checker
+      // debe usarla en TODAS sus consultas; org_beta usa el secreto compartido.
+      process.env.AGENTIC_2A_KEYS = JSON.stringify({ [ORG_DEDICADA]: KEY_DEDICADA })
 
       // 2.0 Fail-closed de contexto: sin organización NO se consulta
       const noCtx = await lockChecker.checkLock('573017543786', '')
@@ -226,6 +249,20 @@ async function runContractsIntegrationSuite() {
       assert.strictEqual(handoffLock.available, false)
       assert.strictEqual(handoffLock.state, 'HANDOFF_HUMAN')
       locksStore.delete(`${ORG_A}\u0000573017543786`)
+
+      // 2.3b CUARTA FASE: identidad POR ORGANIZACIÓN — con AGENTIC_2A_KEYS la
+      // org dedicada envía SU clave (aceptada) y el secreto global es rechazado
+      // por 2A (403) → el checker lo clasifica como error de CONTRATO.
+      process.env.AGENTIC_2A_KEYS = JSON.stringify({ [ORG_DEDICADA]: KEY_DEDICADA })
+      const withKey = await lockChecker.checkLock('573017543786', ORG_DEDICADA)
+      assert.strictEqual(withKey.available, true, 'la org con clave dedicada consulta con SU clave')
+      process.env.AGENTIC_2A_KEYS = ''
+      const withShared = await lockChecker.checkLock('573017543786', ORG_DEDICADA)
+      assert.strictEqual(withShared.available, false, 'el secreto global ya no sirve para la org dedicada')
+      assert.strictEqual(withShared.contractError, true, 'el rechazo 403 de identidad es error de CONTRATO')
+      assert.ok(withShared.error?.includes('TENANT_CONTEXT_REJECTED_403'))
+      // Se RESTAURA la configuración de claves dedicada para el resto del bloque
+      process.env.AGENTIC_2A_KEYS = JSON.stringify({ [ORG_DEDICADA]: KEY_DEDICADA })
 
       // 2.4 Fail-Closed ante error 500 de Capa 2A
       simulate500 = true
