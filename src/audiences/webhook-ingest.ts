@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { canonicalizePhone } from './csv-importer.ts'
+import { createHash } from 'node:crypto'
 import { LEGACY_LEAD_ORG } from '../security.ts'
 
 export interface RealtimeLeadPayload {
@@ -79,7 +80,9 @@ export class WebhookLeadIngester {
       const campaign = this.db.prepare('SELECT id, status FROM campaigns WHERE id = ?').get(payload.campaignId) as any
       if (campaign && campaign.status !== 'COMPLETED' && campaign.status !== 'CANCELLED') {
         const itemId = `itm_${randomUUID()}`
-        const idempotencyKey = `${payload.campaignId}_${canonical}`
+        // (reparación integral) MISMA función de clave que el importador CSV:
+        // formatos distintos sobre una columna UNIQUE creaban ítems duplicados.
+        const idempotencyKey = createHash('sha256').update(`${payload.campaignId}_${canonical}`).digest('hex')
         try {
           this.db.prepare(`
             INSERT INTO campaign_items (id, campaign_id, contact_phone, contact_name, variables_json, status, retry_count, idempotency_key)

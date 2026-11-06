@@ -35,9 +35,14 @@ export class Http2ASuppressionChecker implements SuppressionChecker {
     const url = `${this.baseUrl}/api/internal/suppression/${encodedPhone}`
 
     try {
+      // (reparación integral) Capa 2A exige Bearer INTERNAL_API_SECRET en toda /api/*.
+      const headers: Record<string, string> = { 'Accept': 'application/json' }
+      if (process.env.INTERNAL_API_SECRET) {
+        headers['Authorization'] = `Bearer ${process.env.INTERNAL_API_SECRET}`
+      }
       const response = await fetch(url, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers,
         signal: AbortSignal.timeout(this.timeoutMs),
       })
 

@@ -203,7 +203,8 @@ export class BroadcastEngine {
    */
   async processNextItem(campaignId: string, customDate?: Date): Promise<{ processed: boolean; status?: string; error?: string }> {
     const campaign = this.getCampaign(campaignId)
-    if (!campaign || campaign.status === 'COMPLETED' || campaign.status === 'CANCELLED') {
+    // (reparación integral) PAUSED tampoco puede despachar: la pausa debe respetarse.
+    if (!campaign || ['COMPLETED', 'CANCELLED', 'PAUSED', 'PAUSED_OFF_HOURS', 'PAUSED_COOLDOWN'].includes(campaign.status)) {
       return { processed: false, status: campaign?.status }
     }
 
@@ -321,11 +322,12 @@ export class BroadcastEngine {
     const dispatchTime = Math.floor(Date.now() / 1000)
 
     if (dispatchRes.success) {
+      // Guard: solo el worker que reclama escribe el resultado (multi-réplica seguro)
       this.db.prepare(`
         UPDATE campaign_items
         SET status = 'SENT', dispatched_at = ?, message_id = ?
-        WHERE id = ?
-      `).run(dispatchTime, dispatchRes.messageId || null, nextItem.id)
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(dispatchTime, dispatchRes.messageId || null, nextItem.id, this.workerId)
 
       this.db.prepare('UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ?').run(campaignId)
       this.fatigueManager.recordBroadcast(phone, campaignId)
@@ -338,8 +340,8 @@ export class BroadcastEngine {
       this.db.prepare(`
         UPDATE campaign_items
         SET status = 'UNCERTAIN_DISPATCH', error_reason = ?
-        WHERE id = ?
-      `).run(dispatchRes.error || 'Resultado incierto de despacho (Requiere reconciliación previa)', nextItem.id)
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(dispatchRes.error || 'Resultado incierto de despacho (Requiere reconciliación previa)', nextItem.id, this.workerId)
 
       this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: 'UNCERTAIN_DISPATCH', error: dispatchRes.error }
@@ -351,8 +353,8 @@ export class BroadcastEngine {
       this.db.prepare(`
         UPDATE campaign_items
         SET status = ?, error_reason = ?, retry_count = retry_count + 1
-        WHERE id = ?
-      `).run(newStatus, dispatchRes.error || 'Fallo de despacho saliente confirmado', nextItem.id)
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(newStatus, dispatchRes.error || 'Fallo de despacho saliente confirmado', nextItem.id, this.workerId)
 
       this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: newStatus, error: dispatchRes.error }
@@ -435,12 +437,16 @@ export class BroadcastEngine {
     // Cualquier ítem que quedó en estado transitorio 'DISPATCHING' cuando el proceso cayó
     // NO debe reintentarse ciegamente (pudo haberse enviado al socket antes de la caída).
     // Se marca 'UNCERTAIN_DISPATCH' exigiendo reconciliación controlada.
+    // (reparación integral) Solo los claims EXPIRIDOS o huérfanos (claimed_at nulo de
+    // migraciones viejas) se marcan UNCERTAIN_DISPATCH; los ítems en vuelo de workers
+    // vivos (claim reciente) NO se tocan al arrancar otra réplica.
+    const staleCutoff = Math.floor(Date.now() / 1000) - 900
     const result = this.db.prepare(`
       UPDATE campaign_items
       SET status = 'UNCERTAIN_DISPATCH', error_reason = 'Proceso interrumpido durante despacho (Resultado Incierto - Bloqueado contra reenvío ciego)'
-      WHERE status = 'DISPATCHING'
-    `).run()
+      WHERE status = 'DISPATCHING' AND (claimed_at IS NULL OR claimed_at < ?)
+    `).run(staleCutoff)
 
-    return { recoveredCount: result.changes }
+    return { recoveredCount: Number(result.changes) }
   }
 }

@@ -49,7 +49,8 @@ export function createBroadcastServer(options?: {
     options?.dispatcher ||
     (options?.useMetaCloudApi || process.env.TRANSPORT_ENGINE === 'meta_cloud'
       ? new MetaCloudDispatcher()
-      : new HttpCrmDaemonDispatcher({ allowRealDispatch: false }))
+      // (reparación integral) paridad de salvaguarda: el env explícito habilita el daemon
+      : new HttpCrmDaemonDispatcher({ allowRealDispatch: process.env.ALLOW_REAL_DISPATCH === 'true' }))
   const lockChecker = options?.lockChecker || (whatsPowerEnabled ? new Http2ALockChecker({ enabled: true }) : new StandaloneLockChecker())
   const suppressionStore =
     options?.suppressionStore ||
@@ -130,11 +131,16 @@ export function createBroadcastServer(options?: {
 
     // 2. Previsualizador Spintax
     if (req.method === 'POST' && url.pathname === '/api/spintax/preview') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const { template, name, variables } = JSON.parse(body)
+          const { template, name, variables } = JSON.parse(rb.body)
           const rendered = renderSpintax(template || '', {
             seed: String(Math.random()),
             // Alias name/nombre: el Studio usa {{nombre}} y el CSV usa {{name}};
@@ -147,17 +153,22 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
     // 3. Previsualizador y Validador CSV
     if (req.method === 'POST' && url.pathname === '/api/audiences/preview-csv') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const { csvContent } = JSON.parse(body)
+          const { csvContent } = JSON.parse(rb.body)
           const result = parseAudienceCsv(csvContent || '')
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -165,7 +176,7 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
@@ -398,11 +409,16 @@ export function createBroadcastServer(options?: {
 
     // 11. Neuromarketing AI: Análisis de Mercado y Perfil Subconsciente
     if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/analyze') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const payload = JSON.parse(body)
+          const payload = JSON.parse(rb.body)
           const result = neuromarketingEngine.analyzeTargetMarket(payload)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -410,17 +426,22 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
     // 12. Neuromarketing AI: Generación Automática de Spintax Persuasivo
     if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/generate-spintax') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const payload = JSON.parse(body)
+          const payload = JSON.parse(rb.body)
           const result = neuromarketingEngine.generateNeuromarketingSpintax(payload)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -428,17 +449,22 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
     // 13. Neuromarketing AI: Constructor de Master Prompt 360° para LLMs
     if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/master-prompt') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const payload = JSON.parse(body)
+          const payload = JSON.parse(rb.body)
           const prompt = neuromarketingEngine.buildMasterPrompt(payload)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ masterPrompt: prompt }))
@@ -446,7 +472,7 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 

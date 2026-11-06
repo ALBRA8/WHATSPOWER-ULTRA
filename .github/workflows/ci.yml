@@ -1,9 +1,9 @@
 name: CI WHATSPOWER-ULTRA
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'fix/**']
 
 jobs:
   ci:
