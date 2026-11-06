@@ -5,7 +5,7 @@ export class MockDispatcher implements Dispatcher {
   shouldFail: boolean = false
   failureReason: string = 'MOCK_DISPATCH_FAILED'
 
-  async dispatch(to: string, text: string): Promise<DispatchResult> {
+  async dispatch(to: string, text: string, _organizationId?: string): Promise<DispatchResult> {
     if (this.shouldFail) {
       return { success: false, error: this.failureReason }
     }
@@ -27,7 +27,7 @@ export class HttpCrmDaemonDispatcher implements Dispatcher {
     this.allowRealDispatch = options?.allowRealDispatch ?? false
   }
 
-  async dispatch(to: string, text: string): Promise<DispatchResult> {
+  async dispatch(to: string, text: string, organizationId?: string): Promise<DispatchResult> {
     // SALVAGUARDA FÍSICA (orden de cierre 2026-11-06): si no se autoriza explícitamente el
     // envío real, BLOQUEAR SIEMPRE — la condición anterior por substring ':3002' era
     // bypasseable cambiando el host/puerto del daemon.
@@ -38,14 +38,25 @@ export class HttpCrmDaemonDispatcher implements Dispatcher {
       }
     }
 
+    // B3 — IDENTIDAD DE ORGANIZACIÓN OBLIGATORIA (fail-closed, sin red):
+    // el despacho NOMBRA su organización (P0.1: el daemon jamás acepta "la
+    // sesión global"). Sin organización no se despacha.
+    if (!organizationId || typeof organizationId !== 'string') {
+      return {
+        success: false,
+        error: 'TENANT_CONTEXT_INVALID: dispatch exige organizationId de la campaña (el daemon no acepta despachos sin organización)',
+      }
+    }
+
     try {
       const response = await fetch(this.endpointUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.secret}`,
+          'X-Org-Id': organizationId,
         },
-        body: JSON.stringify({ to, text }),
+        body: JSON.stringify({ to, text, orgId: organizationId }),
         signal: AbortSignal.timeout(5000),
       })
 

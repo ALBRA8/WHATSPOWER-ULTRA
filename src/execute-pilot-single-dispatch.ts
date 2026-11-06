@@ -77,7 +77,7 @@ async function executeSingleSupervisedPilot() {
 
   try {
     console.log('[Paso 5] Emitiendo POST /send al daemon WhatsApp Baileys...')
-    const dispatchRes = await dispatcher.dispatch(TARGET_PHONE, EXACT_TEXT)
+    const dispatchRes = await dispatcher.dispatch(TARGET_PHONE, EXACT_TEXT, PILOT_ORG)
     console.log('Respuesta cruda del Dispatcher:', dispatchRes)
 
     if (dispatchRes.success) {

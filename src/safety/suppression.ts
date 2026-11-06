@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { SuppressionChecker } from '../types.ts'
+import { resolveOrgServiceCredential } from '../org-credentials.ts'
 
 /**
  * POLÍTICA DE SUPRESIÓN (tercera reparación 5.B — decisión documentada):
@@ -98,17 +99,23 @@ export class Http2ASuppressionChecker implements SuppressionChecker {
       // asume una org por defecto ni se consulta "global")
       throw new Error('TENANT_CONTEXT_INVALID: isSuppressed exige organizationId de la campaña')
     }
+    // B3: credencial de servicio VINCULADA a esta organización. Sin ella la
+    // llamada NO se hace (fail-closed, sin red): el secreto global ya no
+    // sustituye la validación de organización.
+    const orgCredential = resolveOrgServiceCredential(organizationId)
+    if (!orgCredential) {
+      throw new Error(`TENANT_CREDENTIAL_MISSING: sin credencial de servicio registrada para ${organizationId} (configura WHATSPOWER_ORG_CREDENTIALS "orgId:credencial")`)
+    }
     const encodedPhone = encodeURIComponent(phone)
     const url = `${this.baseUrl}/api/internal/suppression/${encodedPhone}`
 
     try {
       // (tercera reparación 5.A) X-Org-Id SIEMPRE presente + verificación del eco.
+      // (B3) Bearer = credencial de servicio de ESTA organización (no secreto global).
       const headers: Record<string, string> = {
         'Accept': 'application/json',
         'X-Org-Id': organizationId,
-      }
-      if (process.env.INTERNAL_API_SECRET) {
-        headers['Authorization'] = `Bearer ${process.env.INTERNAL_API_SECRET}`
+        'Authorization': `Bearer ${orgCredential}`,
       }
       const response = await fetch(url, {
         method: 'GET',

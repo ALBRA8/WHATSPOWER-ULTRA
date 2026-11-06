@@ -28,7 +28,7 @@ import { renderSpintax } from '../src/engine/spintax.ts'
 // ---------------------------------------------------------------------------
 // U3-A. 5.A — PROPAGACIÓN Y VERIFICACIÓN DE ORGANIZACIÓN
 // ---------------------------------------------------------------------------
-test('U3-01: Http2ALockChecker envía X-Org-Id SIEMPRE y valida el eco de organización', async () => {
+test('U3-01: Http2ALockChecker envía X-Org-Id + credencial DE LA ORG y valida el eco (B3)', async () => {
   const seen: { url: string; org: string | undefined; auth: string | undefined } = { url: '', org: undefined, auth: undefined }
   const stub = createServer((req, res) => {
     seen.url = req.url || ''
@@ -38,19 +38,25 @@ test('U3-01: Http2ALockChecker envía X-Org-Id SIEMPRE y valida el eco de organi
     res.end(JSON.stringify({ phone: '573001112233', locked: false, lock: null, organizationId: seen.org }))
   })
   await new Promise<void>((r) => stub.listen(3910, () => r()))
-  process.env.INTERNAL_API_SECRET = 'ultra_t3_internal_secret_min24chars'
+  // B3: credenciales de servicio POR ORGANIZACIÓN (el secreto global ya no viaja).
+  const CRED_A = 'org_alpha_cred_tercera_reparacion_001'
+  const CRED_B = 'org_beta_cred_tercera_reparacion_0002'
+  process.env.WHATSPOWER_ORG_CREDENTIALS = `org_alpha:${CRED_A},org_beta:${CRED_B}`
+  delete process.env.INTERNAL_API_SECRET
   try {
     const checker = new Http2ALockChecker({ baseUrl: 'http://localhost:3910', timeoutMs: 800 })
     const res = await checker.checkLock('573001112233', 'org_alpha')
     assert.strictEqual(res.available, true)
     assert.strictEqual(seen.org, 'org_alpha', 'el header X-Org-Id debe viajar en TODA llamada')
-    assert.ok(seen.auth?.startsWith('Bearer '), 'el Bearer de INTERNAL_API_SECRET viaja junto al org')
+    assert.strictEqual(seen.auth, `Bearer ${CRED_A}`, 'el Bearer es la credencial DE LA ORGANIZACIÓN (no el global)')
 
-    // La MISMA llamada con OTRA org consulta ese otro contexto
+    // La MISMA llamada con OTRA org usa SU credencial
     await checker.checkLock('573001112233', 'org_beta')
     assert.strictEqual(seen.org, 'org_beta')
+    assert.strictEqual(seen.auth, `Bearer ${CRED_B}`)
   } finally {
     stub.close()
+    delete process.env.WHATSPOWER_ORG_CREDENTIALS
   }
 })
 

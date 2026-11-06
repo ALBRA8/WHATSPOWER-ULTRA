@@ -71,7 +71,12 @@ export interface DispatchResult {
 }
 
 export interface Dispatcher {
-  dispatch(to: string, text: string): Promise<DispatchResult>
+/**
+ * B3: organizationId es la identidad de organización del despacho. Los
+ * despachos REALES la exigen (fail-closed en HttpCrmDaemonDispatcher): el
+ * daemon no acepta despachos que no nombran su organización.
+ */
+  dispatch(to: string, text: string, organizationId?: string): Promise<DispatchResult>
 }
 
 export interface LockCheckResult {

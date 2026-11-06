@@ -347,7 +347,8 @@ export class BroadcastEngine {
     `).run(renderedText, checkNow, nextItem.id, this.workerId)
 
     // G. Despacho a través de la Interfaz del CRM
-    const dispatchRes = await this.dispatcher.dispatch(phone, renderedText)
+    // B3: el despacho NOMBRA la organización de la campaña (identidad extremo a extremo).
+    const dispatchRes = await this.dispatcher.dispatch(phone, renderedText, campaign.organizationId)
     const dispatchTime = Math.floor(Date.now() / 1000)
 
     if (dispatchRes.success) {

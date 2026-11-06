@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { LockChecker, LockCheckResult } from '../types.ts'
+import { resolveOrgServiceCredential } from '../org-credentials.ts'
 
 /**
  * LockChecker para modo Plug & Play Standalone (cuando Nivel 2 WhatsPower no está contratado ni activo)
@@ -45,6 +46,18 @@ export class Http2ALockChecker implements LockChecker {
       return { available: false, contractError: true, error: 'TENANT_CONTEXT_INVALID: checkLock exige organizationId de la campaña' }
     }
 
+    // B3: credencial de servicio VINCULADA a esta organización. Sin ella la
+    // llamada NO se hace (fail-closed, sin red): el secreto global ya no
+    // sustituye la validación de organización.
+    const orgCredential = resolveOrgServiceCredential(organizationId)
+    if (!orgCredential) {
+      return {
+        available: false,
+        contractError: true,
+        error: `TENANT_CREDENTIAL_MISSING: sin credencial de servicio registrada para ${organizationId} (configura WHATSPOWER_ORG_CREDENTIALS "orgId:credencial")`,
+      }
+    }
+
     const encodedPhone = encodeURIComponent(phone)
     const url = `${this.baseUrl}/api/internal/locks/${encodedPhone}`
 
@@ -52,9 +65,7 @@ export class Http2ALockChecker implements LockChecker {
       const headers: Record<string, string> = {
         'Accept': 'application/json',
         'X-Org-Id': organizationId,
-      }
-      if (process.env.INTERNAL_API_SECRET) {
-        headers['Authorization'] = `Bearer ${process.env.INTERNAL_API_SECRET}`
+        'Authorization': `Bearer ${orgCredential}`,
       }
       const response = await fetch(url, {
         method: 'GET',

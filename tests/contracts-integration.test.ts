@@ -81,7 +81,7 @@ async function runContractsIntegrationSuite() {
       })
 
       // 1.1 Solicitud exitosa
-      const okRes = await dispatcher.dispatch('573017543786', 'Mensaje de prueba contractual')
+      const okRes = await dispatcher.dispatch('573017543786', 'Mensaje de prueba contractual', 'org_contract')
       assert.strictEqual(okRes.success, true)
       assert.ok(okRes.messageId?.startsWith('msg_mock_'))
       assert.strictEqual(lastReceivedBody.to, '573017543786')
@@ -93,20 +93,20 @@ async function runContractsIntegrationSuite() {
         secret: 'wrong_secret',
         allowRealDispatch: true,
       })
-      const authErrRes = await badAuthDispatcher.dispatch('573017543786', 'Test')
+      const authErrRes = await badAuthDispatcher.dispatch('573017543786', 'Test', 'org_contract')
       assert.strictEqual(authErrRes.success, false)
       assert.ok(authErrRes.error?.includes('401'))
 
       // 1.3 Error de WhatsApp desconectado en daemon
       daemonState = 'disconnected'
-      const discoRes = await dispatcher.dispatch('573017543786', 'Test')
+      const discoRes = await dispatcher.dispatch('573017543786', 'Test', 'org_contract')
       assert.strictEqual(discoRes.success, false)
       assert.ok(discoRes.error?.includes('WhatsApp no conectado'))
       daemonState = 'connected'
 
       // 1.4 Respuesta malformada (200 con cuerpo no JSON) -> marca resultado INCIERTO
       simulateMalformed = true
-      const malformedRes = await dispatcher.dispatch('573017543786', 'Test')
+      const malformedRes = await dispatcher.dispatch('573017543786', 'Test', 'org_contract')
       assert.strictEqual(malformedRes.success, false)
       assert.strictEqual(malformedRes.uncertain, true)
       assert.ok(malformedRes.error?.includes('DAEMON_MALFORMED_RESPONSE'))
@@ -117,7 +117,7 @@ async function runContractsIntegrationSuite() {
         endpointUrl: 'http://localhost:3002/send',
         allowRealDispatch: false,
       })
-      const blockedRes = await safeGuardDispatcher.dispatch('573017543786', 'Test')
+      const blockedRes = await safeGuardDispatcher.dispatch('573017543786', 'Test', 'org_contract')
       assert.strictEqual(blockedRes.success, false)
       assert.ok(blockedRes.error?.includes('DISPATCH_BLOCKED_BY_SAFETY_GUARD'))
 
@@ -190,6 +190,8 @@ async function runContractsIntegrationSuite() {
 
     await new Promise<void>((r) => mock2AServer.listen(TEST_2A_PORT, r))
 
+    // B3: credenciales de servicio POR ORGANIZACIÓN (el global ya no autoriza).
+    process.env.WHATSPOWER_ORG_CREDENTIALS = 'org_alpha:cred_org_alpha_integracion_0001,org_beta:cred_org_beta_integracion_0002'
     try {
       const lockChecker = new Http2ALockChecker({
         baseUrl: `http://localhost:${TEST_2A_PORT}`,
@@ -264,6 +266,7 @@ async function runContractsIntegrationSuite() {
       console.log('  ✅ [PASS] TEST 2: Contrato 2A v2 validado (X-Org-Id obligatorio, eco de org, aislamiento, fail-closed 500/timeout/contrato roto)')
       passed++
     } finally {
+      delete process.env.WHATSPOWER_ORG_CREDENTIALS
       await new Promise<void>((r) => mock2AServer.close(() => r()))
     }
   }
