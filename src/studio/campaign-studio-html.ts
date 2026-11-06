@@ -258,6 +258,17 @@ export function renderCampaignStudioHtml(): string {
   </main>
 
   <script>
+    // Autenticación del Studio (reparación integral): herramienta del operador; pide el
+    // token (Bearer ADMIN_API_KEYS) una sola vez y lo usa en TODAS las llamadas /api/*.
+    function ultraToken() {
+      let t = localStorage.getItem('ultra_admin_token');
+      if (!t) { t = prompt('Token de acceso (Bearer de ADMIN_API_KEYS):') || ''; if (t) localStorage.setItem('ultra_admin_token', t); }
+      return t;
+    }
+    async function authFetch(url, opts = {}) {
+      const headers = Object.assign({ 'Authorization': 'Bearer ' + ultraToken() }, opts.headers || {});
+      return fetch(url, Object.assign({}, opts, { headers }));
+    }
     let activeCampaignId = null;
     let pollInterval = null;
 
@@ -268,7 +279,7 @@ export function renderCampaignStudioHtml(): string {
       const pain = document.getElementById('neuroPain').value;
 
       try {
-        const res = await fetch('/api/ai/neuromarketing/generate-spintax', {
+        const res = await authFetch('/api/ai/neuromarketing/generate-spintax', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ productName, country, mainBenefit: benefit, painPoint: pain })
@@ -290,7 +301,7 @@ export function renderCampaignStudioHtml(): string {
       for (let i = 1; i <= 5; i++) {
         const seed = 'test_' + Math.random();
         try {
-          const res = await fetch('/api/spintax/preview', {
+          const res = await authFetch('/api/spintax/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ template, name: 'Juan Pérez' })
@@ -309,7 +320,7 @@ export function renderCampaignStudioHtml(): string {
     async function previewCsv() {
       const csv = document.getElementById('cmpCsv').value;
       try {
-        const res = await fetch('/api/audiences/preview-csv', {
+        const res = await authFetch('/api/audiences/preview-csv', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ csvContent: csv })
@@ -327,7 +338,7 @@ export function renderCampaignStudioHtml(): string {
       const csv = document.getElementById('cmpCsv').value;
 
       try {
-        const res = await fetch('/api/campaigns', {
+        const res = await authFetch('/api/campaigns', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -356,7 +367,7 @@ export function renderCampaignStudioHtml(): string {
     async function refreshCurrentCampaign() {
       if (!activeCampaignId) return;
       try {
-        const res = await fetch('/api/campaigns/' + activeCampaignId);
+        const res = await authFetch('/api/campaigns/' + activeCampaignId);
         if (!res.ok) return;
         const data = await res.json();
         const cmp = data.campaign;
@@ -394,19 +405,19 @@ export function renderCampaignStudioHtml(): string {
 
     async function pauseCampaign() {
       if (!activeCampaignId) return;
-      await fetch('/api/campaigns/' + activeCampaignId + '/pause', { method: 'POST' });
+      await authFetch('/api/campaigns/' + activeCampaignId + '/pause', { method: 'POST' });
       refreshCurrentCampaign();
     }
 
     async function resumeCampaign() {
       if (!activeCampaignId) return;
-      await fetch('/api/campaigns/' + activeCampaignId + '/resume', { method: 'POST' });
+      await authFetch('/api/campaigns/' + activeCampaignId + '/resume', { method: 'POST' });
       refreshCurrentCampaign();
     }
 
     async function cancelCampaign() {
       if (!activeCampaignId) return;
-      await fetch('/api/campaigns/' + activeCampaignId + '/cancel', { method: 'POST' });
+      await authFetch('/api/campaigns/' + activeCampaignId + '/cancel', { method: 'POST' });
       refreshCurrentCampaign();
     }
 
