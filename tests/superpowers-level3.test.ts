@@ -19,13 +19,14 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     })
 
     // 1. Ingesta de lead exitosa con normalización (+57) y vinculación a campaña
+    // (reparación integral: la org va LIGADA a la verificación, nunca del body)
     const resValid = leadIngester.ingestLead({
       phone: '3019876543', // 10 dígitos -> 573019876543
       name: 'Juan Lead Facebook',
       source: 'facebook_ads',
       campaignId: campaign.id,
       variables: { origen: 'Campaña Black Friday' },
-    })
+    }, 'org_test')
 
     assert.strictEqual(resValid.success, true)
     assert.strictEqual(resValid.canonicalPhone, '573019876543')

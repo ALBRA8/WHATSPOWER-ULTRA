@@ -26,6 +26,8 @@ export class BroadcastEngine {
   suppressionStore: SuppressionChecker
   fatigueManager: FatigueManager
   throttler: Throttler
+  /** Identidad única de este worker — queda registrada en campaign_items.claimed_by. */
+  readonly workerId: string
 
   constructor(options: {
     db: DatabaseSync
@@ -33,6 +35,7 @@ export class BroadcastEngine {
     lockChecker: LockChecker
     suppressionStore?: SuppressionChecker
     throttlerOptions?: Partial<ThrottlerOptions>
+    workerId?: string
   }) {
     this.db = options.db
     this.dispatcher = options.dispatcher
@@ -40,6 +43,7 @@ export class BroadcastEngine {
     this.suppressionStore = options.suppressionStore || new LocalSuppressionStore(this.db)
     this.fatigueManager = new FatigueManager(this.db)
     this.throttler = new Throttler(options.throttlerOptions)
+    this.workerId = options.workerId || `wrk_${randomUUID()}`
   }
 
   /**
@@ -215,20 +219,26 @@ export class BroadcastEngine {
       return { processed: false, status: 'PAUSED_COOLDOWN', error: 'En pausa de enfriamiento por lote' }
     }
 
-    // C. Obtener siguiente ítem PENDING
-    const nextItem = this.db.prepare(`
-      SELECT * FROM campaign_items
-      WHERE campaign_id = ? AND status = 'PENDING'
-      ORDER BY rowid ASC
-      LIMIT 1
-    `).get(campaignId) as any
+    // C. CLAIM ATÓMICO (reparación integral 2026-11-06):
+    // Un ítem solo puede pasar PENDING→DISPATCHING por UN worker. El UPDATE condicional
+    // es la primitiva de claim: si otro worker lo tomó primero, changes === 0.
+    const pendingExists = this.db.prepare(
+      "SELECT 1 AS x FROM campaign_items WHERE campaign_id = ? AND status = 'PENDING' LIMIT 1"
+    ).get(campaignId)
 
-    if (!nextItem) {
+    if (!pendingExists) {
       // Si no quedan ítems PENDING, la campaña se marca COMPLETED
       const now = Math.floor(Date.now() / 1000)
       this.db.prepare("UPDATE campaigns SET status = 'COMPLETED', finished_at = ? WHERE id = ?").run(now, campaignId)
       return { processed: false, status: 'COMPLETED' }
     }
+
+    const claim = this.claimNextItem(campaignId)
+    if (!claim.claimed) {
+      // Carrera perdida: otro worker reclamó el ítem candidato. NO se marca COMPLETED.
+      return { processed: false, status: 'CLAIMED_BY_OTHER_WORKER' }
+    }
+    const nextItem = claim.item as any
 
     // Marcar como RUNNING si estaba DRAFT
     if (campaign.status === 'DRAFT') {
@@ -236,7 +246,7 @@ export class BroadcastEngine {
       this.db.prepare("UPDATE campaigns SET status = 'RUNNING', started_at = ? WHERE id = ?").run(now, campaignId)
     }
 
-    const phone = nextItem.contact_phone
+    const phone = nextItem.contactPhone
     const checkNow = Math.floor(Date.now() / 1000)
 
     // D1. FASE 2: Comprobación Just-In-Time de Supresiones / Bajas (< 50 ms antes del despacho)
@@ -289,21 +299,22 @@ export class BroadcastEngine {
 
     // E. Generación determinista de Spintax con semilla por contacto
     const seed = `${campaignId}_${phone}`
-    const variables: Record<string, string> = nextItem.variables_json ? JSON.parse(nextItem.variables_json) : {}
-    if (nextItem.contact_name) {
-      variables.name = nextItem.contact_name
+    const variables: Record<string, string> = nextItem.variables ? { ...nextItem.variables } : {}
+    if (nextItem.contactName) {
+      variables.name = nextItem.contactName
       // Alias: las plantillas del Campaign Studio usan {{nombre}} (el CSV usa {{name}})
-      if (!variables.nombre) variables.nombre = nextItem.contact_name
+      if (!variables.nombre) variables.nombre = nextItem.contactName
     }
 
     const renderedText = renderSpintax(campaign.templateSpintax, { seed, variables })
 
-    // F. Transición a DISPATCHING en BD antes de iniciar la llamada de red
+    // F. El ítem ya está en DISPATCHING desde el claim atómico; se registran
+    //    el texto renderizado y el momento del check de lock.
     this.db.prepare(`
       UPDATE campaign_items
-      SET status = 'DISPATCHING', rendered_text = ?, lock_checked_at = ?
-      WHERE id = ?
-    `).run(renderedText, checkNow, nextItem.id)
+      SET rendered_text = ?, lock_checked_at = ?
+      WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+    `).run(renderedText, checkNow, nextItem.id, this.workerId)
 
     // G. Despacho a través de la Interfaz del CRM
     const dispatchRes = await this.dispatcher.dispatch(phone, renderedText)
@@ -334,7 +345,7 @@ export class BroadcastEngine {
       return { processed: true, status: 'UNCERTAIN_DISPATCH', error: dispatchRes.error }
     } else {
       // Fallo confirmado por el daemon (400, auth, etc.)
-      const isRetryable = nextItem.retry_count < 2
+      const isRetryable = nextItem.retryCount < 2
       const newStatus = isRetryable ? 'FAILED_RETRYABLE' : 'FAILED_FATAL'
 
       this.db.prepare(`
@@ -346,6 +357,75 @@ export class BroadcastEngine {
       this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: newStatus, error: dispatchRes.error }
     }
+  }
+
+  /**
+   * CLAIM ATÓMICO (reparación integral 2026-11-06):
+   * selecciona el candidato y lo mueve PENDING→DISPATCHING con un UPDATE condicional
+   * en una sola sentencia lógica: si otro worker lo reclamó primero, changes === 0.
+   * El ítem reclamado queda registrado con claimed_by/claimed_at para trazabilidad
+   * y reconciliación controlada.
+   */
+  claimNextItem(campaignId: string): { claimed: false } | { claimed: true; item: CampaignItem } {
+    const candidate = this.db.prepare(`
+      SELECT id FROM campaign_items
+      WHERE campaign_id = ? AND status = 'PENDING'
+      ORDER BY rowid ASC
+      LIMIT 1
+    `).get(campaignId) as { id: string } | undefined
+
+    if (!candidate) return { claimed: false }
+
+    const now = Math.floor(Date.now() / 1000)
+    const claimRes = this.db.prepare(`
+      UPDATE campaign_items
+      SET status = 'DISPATCHING', claimed_by = ?, claimed_at = ?
+      WHERE id = ? AND status = 'PENDING'
+    `).run(this.workerId, now, candidate.id)
+
+    // node:sqlite devuelve changes como number | bigint: normalizar (0n === 0 es false)
+    if (Number(claimRes.changes) === 0) return { claimed: false }
+
+    const item = this.getItem(candidate.id)
+    if (!item) return { claimed: false }
+    return { claimed: true, item }
+  }
+
+  getItem(id: string): CampaignItem | null {
+    const r = this.db.prepare('SELECT * FROM campaign_items WHERE id = ?').get(id) as any
+    if (!r) return null
+    return {
+      id: r.id,
+      campaignId: r.campaign_id,
+      contactPhone: r.contact_phone,
+      contactName: r.contact_name || undefined,
+      variables: r.variables_json ? JSON.parse(r.variables_json) : undefined,
+      renderedText: r.rendered_text || undefined,
+      status: r.status,
+      lockCheckedAt: r.lock_checked_at || undefined,
+      dispatchedAt: r.dispatched_at || undefined,
+      errorReason: r.error_reason || undefined,
+      messageId: r.message_id || undefined,
+      retryCount: r.retry_count,
+      idempotencyKey: r.idempotency_key,
+    }
+  }
+
+  /**
+   * Reconciliación CONTROLADA (nunca reintento ciego):
+   * mueve a UNCERTAIN_DISPATCH los ítems DISPATCHING con claims expirados
+   * (worker muerto sin pasar por recoverFromCrash). No los devuelve a PENDING jamás;
+   * exigen resolución humana o del proceso de reconciliación autorizado.
+   */
+  reconcileStaleClaims(maxAgeSeconds: number = 900): { reconciledCount: number } {
+    const cutoff = Math.floor(Date.now() / 1000) - maxAgeSeconds
+    const res = this.db.prepare(`
+      UPDATE campaign_items
+      SET status = 'UNCERTAIN_DISPATCH',
+          error_reason = 'Claim de worker expirado (reconciliación controlada — resultado incierto, requiere resolución manual)'
+      WHERE status = 'DISPATCHING' AND claimed_at IS NOT NULL AND claimed_at < ?
+    `).run(cutoff)
+    return { reconciledCount: Number(res.changes) }
   }
 
   /**

@@ -16,9 +16,13 @@ import {
   resolveIdentity,
   checkWebhookSecurity,
   readBody,
-  ReplayCache,
+  DurableReplayCache,
+  parseLeadSecretSpec,
+  resolveLeadSecrets,
+  LEGACY_LEAD_ORG,
   productionConfigProblems,
   type AdminIdentity,
+  type LeadSecretSpec,
 } from './security.ts'
 
 // Carga el .env del repo si existe (mismo patrón que Capa 2A; sin él el guard de
@@ -34,6 +38,8 @@ export function createBroadcastServer(options?: {
   suppressionStore?: any
   whatsPowerEnabled?: boolean
   useMetaCloudApi?: boolean
+  /** Ruta del anti-replay durable; ':memory:' para tests. Default: env REPLAY_DB_PATH o <repo>/db/replay-cache.db */
+  replayDbPath?: string
 }) {
   const whatsPowerEnabled = options?.whatsPowerEnabled ?? (process.env.WHATSPOWER_ENABLED !== 'false')
   const db = createBroadcastDatabase(options?.dbPath)
@@ -66,7 +72,13 @@ export function createBroadcastServer(options?: {
 
   // Identidades administrativas (orden de cierre 2026-11-06)
   const adminKeys: AdminIdentity[] = parseAdminKeys(process.env.ADMIN_API_KEYS)
-  const leadReplay = new ReplayCache()
+  // Anti-replay DURABLE (reparación integral 2026-11-06): sobrevive reinicios;
+  // en tests con dbPath ':memory:' se usa ':memory:' para no compartir estado.
+  const leadReplay = new DurableReplayCache(
+    options?.replayDbPath ?? (options?.dbPath === ':memory:' ? ':memory:' : undefined)
+  )
+  // Secretos de ingesta de leads por organización (contrato v2) + fallback v1.
+  const leadSecretSpec: LeadSecretSpec = parseLeadSecretSpec(process.env)
 
   /** 404 sin oráculo: la campaña debe existir Y pertenecer a la organización del llamador. */
   function ownCampaign(campaignId: string, identity: AdminIdentity) {
@@ -297,7 +309,10 @@ export function createBroadcastServer(options?: {
       return
     }
 
-    // 9. Ingesta de Leads en Tiempo Real — EXIGE HMAC (WEBHOOK_LEAD_SECRET) + timestamp + replay
+    // 9. Ingesta de Leads en Tiempo Real — EXIGE HMAC v2 (secreto POR ORGANIZACIÓN,
+    //    firma ligada a timestamp+org) + timestamp + replay durable.
+    //    La organización NUNCA se toma del body: viene del header X-Org-Id verificado
+    //    con el secreto registrado para esa organización (anti inyección cross-org).
     if (req.method === 'POST' && url.pathname === '/api/audiences/webhook-lead') {
       const rb = await readBody(req)
       if (!rb.ok) {
@@ -305,12 +320,30 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
         return
       }
+      const rawOrg = typeof req.headers['x-org-id'] === 'string' ? (req.headers['x-org-id'] as string).trim() : ''
+      const orgForBinding = rawOrg || LEGACY_LEAD_ORG
+      if (leadSecretSpec.byOrg.size === 0) {
+        // Fail-closed estricto: sin secretos de ingesta configurados, NUNCA se acepta.
+        console.warn(`[Seguridad 2B ALERTA] Ingesta de leads rechazada: sin secretos de webhook configurados (IP: ${req.socket.remoteAddress})`)
+        res.writeHead(503, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Service Unavailable: secretos de ingesta de leads no configurados (fail-closed)' }))
+        return
+      }
+      const orgSecrets = resolveLeadSecrets(leadSecretSpec, orgForBinding)
+      if (!orgSecrets) {
+        console.warn(`[Seguridad 2B ALERTA] Ingesta de leads rechazada: organización de webhook desconocida (IP: ${req.socket.remoteAddress})`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized: organización de webhook desconocida (X-Org-Id)' }))
+        return
+      }
       const sec = checkWebhookSecurity(
         rb.body,
         req.headers['x-signature-sha256'] as string | undefined,
         req.headers['x-timestamp'] as string | undefined,
-        process.env.WEBHOOK_LEAD_SECRET,
+        orgSecrets,
         leadReplay,
+        Date.now(),
+        orgForBinding,
       )
       if (!sec.ok) {
         console.warn(`[Seguridad 2B ALERTA] Ingesta de leads rechazada: ${sec.error} (IP: ${req.socket.remoteAddress})`)
@@ -320,7 +353,14 @@ export function createBroadcastServer(options?: {
       }
       try {
         const payload = JSON.parse(rb.body)
-        const result = leadIngester.ingestLead(payload)
+        const result = leadIngester.ingestLead(payload, orgForBinding === LEGACY_LEAD_ORG ? undefined : orgForBinding)
+        if (!result.success && result.reason === 'CAMPAIGN_ORG_MISMATCH') {
+          // Rechazo anti-inyección cross-org: la firma era válida pero la campaña
+          // referenciada pertenece a otra organización (o el secreto es v1 "_legacy").
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Forbidden: la campaña no pertenece a la organización autenticada' }))
+          return
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(result))
       } catch (e: any) {

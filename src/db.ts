@@ -92,5 +92,26 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_items_campaign ON campaign_items(campaign_id, status);
   `)
 
+  // ============================================================
+  // Migraciones aditivas y REVERSIBLES (reparación integral 2026-11-06)
+  // Documentación y rollback exacto en docs/MIGRACIONES.md.
+  //  - campaign_items.claimed_by / claimed_at → claim atómico del worker
+  //    (rollback: ALTER TABLE campaign_items DROP COLUMN claimed_by;
+  //               ALTER TABLE campaign_items DROP COLUMN claimed_at;)
+  //  - realtime_leads.organization_id → binding org de leads
+  //    (rollback: ALTER TABLE realtime_leads DROP COLUMN organization_id;)
+  // ============================================================
+  const itemCols = (db.prepare('PRAGMA table_info(campaign_items)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!itemCols.includes('claimed_by')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN claimed_by TEXT`)
+  }
+  if (!itemCols.includes('claimed_at')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN claimed_at INTEGER`)
+  }
+  const leadCols = (db.prepare('PRAGMA table_info(realtime_leads)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!leadCols.includes('organization_id')) {
+    db.exec(`ALTER TABLE realtime_leads ADD COLUMN organization_id TEXT`)
+  }
+
   return db
 }

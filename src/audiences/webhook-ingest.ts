@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { canonicalizePhone } from './csv-importer.ts'
+import { LEGACY_LEAD_ORG } from '../security.ts'
 
 export interface RealtimeLeadPayload {
   phone: string
@@ -24,12 +25,30 @@ export class WebhookLeadIngester {
     this.db = db
   }
 
-  ingestLead(payload: RealtimeLeadPayload): IngestResult {
+  /**
+   * Ingesta de lead con binding de organización (reparación integral 2026-11-06):
+   * - organizationId viene de la VERIFICACIÓN HMAC (X-Org-Id autenticado), nunca del body.
+   * - Si el payload referencia una campaña, esa campaña DEBE pertenecer a la organización
+   *   autenticada; en caso contrario se rechaza SIN almacenar (anti inyección cross-org).
+   * - El secreto v1 (org reservada "_legacy") no puede ligar leads a campañas.
+   */
+  ingestLead(payload: RealtimeLeadPayload, organizationId?: string): IngestResult {
+    const org = organizationId ?? LEGACY_LEAD_ORG
     const rawPhone = payload.phone
     const canonical = canonicalizePhone(rawPhone)
 
     if (!canonical) {
       return { success: false, reason: 'INVALID_PHONE_FORMAT' }
+    }
+
+    // Binding cross-org: la campaña referenciada debe pertenecer a la org autenticada.
+    if (payload.campaignId) {
+      const campaign = this.db.prepare('SELECT id, organization_id, status FROM campaigns WHERE id = ?').get(payload.campaignId) as any
+      if (campaign) {
+        if (!org || org === LEGACY_LEAD_ORG || campaign.organization_id !== org) {
+          return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_ORG_MISMATCH' }
+        }
+      }
     }
 
     // Comprobar supresión
@@ -42,8 +61,8 @@ export class WebhookLeadIngester {
     const now = Math.floor(Date.now() / 1000)
 
     this.db.prepare(`
-      INSERT INTO realtime_leads (id, phone, name, source, campaign_id, payload_json, processed, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+      INSERT INTO realtime_leads (id, phone, name, source, campaign_id, payload_json, processed, created_at, organization_id)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(
       leadId,
       canonical,
@@ -51,7 +70,8 @@ export class WebhookLeadIngester {
       payload.source,
       payload.campaignId || null,
       payload.variables ? JSON.stringify(payload.variables) : null,
-      now
+      now,
+      org === LEGACY_LEAD_ORG ? null : org
     )
 
     // Si viene asociado a una campaña activa, agregarlo a campaign_items como PENDING
