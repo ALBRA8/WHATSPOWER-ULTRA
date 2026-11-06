@@ -50,6 +50,8 @@ export interface Campaign {
 export interface CampaignItem {
   id: string
   campaignId: string
+  /** cuarta fase: organización a nivel de fila (heredada de la campaña). */
+  organizationId?: string
   contactPhone: string
   contactName?: string
   variables?: Record<string, string>

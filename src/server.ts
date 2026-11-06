@@ -16,6 +16,7 @@ import { NeuromarketingEngine } from './ai/neuromarketing-engine.ts'
 import {
   parseAdminKeys,
   resolveIdentity,
+  safeEqual,
   checkWebhookSecurity,
   readBody,
   DurableReplayCache,
@@ -143,7 +144,12 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       }
       let secret = ''
       try { secret = String(JSON.parse(rb.body).secret || '') } catch {}
-      const idx = adminKeys.findIndex((k) => k.key === secret)
+      // CUARTA FASE: comparación timing-safe (antes '===' filtraba información
+      // por tiempo — el mismo patrón corregido en WHATSPOWER T3-07).
+      let idx = -1
+      for (let i = 0; i < adminKeys.length; i++) {
+        if (safeEqual(adminKeys[i].key, String(secret))) { idx = i; break }
+      }
       if (idx === -1) {
         console.warn(`[Seguridad 2B ALERTA] Studio login fallido (IP: ${req.socket.remoteAddress})`)
         res.writeHead(401, { 'Content-Type': 'application/json' })

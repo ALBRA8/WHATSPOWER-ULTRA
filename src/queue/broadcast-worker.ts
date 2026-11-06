@@ -147,10 +147,11 @@ export class BroadcastEngine {
   }) {
     this.db.prepare(`
       INSERT INTO campaign_items (
-        id, campaign_id, contact_phone, contact_name, variables_json, status, error_reason, retry_count, idempotency_key
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        id, campaign_id, organization_id, contact_phone, contact_name, variables_json, status, error_reason, retry_count, idempotency_key
+      ) VALUES (?, ?, (SELECT organization_id FROM campaigns WHERE id = ?), ?, ?, ?, ?, ?, 0, ?)
     `).run(
       item.id,
+      item.campaignId,
       item.campaignId,
       item.contactPhone,
       item.contactName || null,
@@ -225,8 +226,12 @@ export class BroadcastEngine {
     // C. CLAIM ATÓMICO (reparación integral 2026-11-06):
     // Un ítem solo puede pasar PENDING→DISPATCHING por UN worker. El UPDATE condicional
     // es la primitiva de claim: si otro worker lo tomó primero, changes === 0.
+    // CUARTA FASE: las filas cuya organization_id difiere de la de SU campaña
+    // (corruptas) quedan en cuarentena: no cuentan como pendientes ni se despachan.
     const pendingExists = this.db.prepare(
-      "SELECT 1 AS x FROM campaign_items WHERE campaign_id = ? AND status = 'PENDING' LIMIT 1"
+      `SELECT 1 AS x FROM campaign_items ci JOIN campaigns c ON c.id = ci.campaign_id
+       WHERE ci.campaign_id = ? AND ci.status = 'PENDING'
+         AND (ci.organization_id IS NULL OR ci.organization_id = c.organization_id) LIMIT 1`
     ).get(campaignId)
 
     if (!pendingExists) {
@@ -398,10 +403,14 @@ export class BroadcastEngine {
    * y reconciliación controlada.
    */
   claimNextItem(campaignId: string): { claimed: false } | { claimed: true; item: CampaignItem } {
+    // CUARTA FASE (aislamiento a nivel de fila): solo se reclaman ítems cuya
+    // organization_id es NULL (legacy ya backfillado al arrancar) o coincide con
+    // la organización de SU campaña. Una fila corrupta jamás se despacha.
     const candidate = this.db.prepare(`
-      SELECT id FROM campaign_items
-      WHERE campaign_id = ? AND status = 'PENDING'
-      ORDER BY rowid ASC
+      SELECT ci.id FROM campaign_items ci JOIN campaigns c ON c.id = ci.campaign_id
+      WHERE ci.campaign_id = ? AND ci.status = 'PENDING'
+        AND (ci.organization_id IS NULL OR ci.organization_id = c.organization_id)
+      ORDER BY ci.rowid ASC
       LIMIT 1
     `).get(campaignId) as { id: string } | undefined
 
@@ -428,6 +437,7 @@ export class BroadcastEngine {
     return {
       id: r.id,
       campaignId: r.campaign_id,
+      organizationId: r.organization_id || undefined,
       contactPhone: r.contact_phone,
       contactName: r.contact_name || undefined,
       variables: r.variables_json ? JSON.parse(r.variables_json) : undefined,

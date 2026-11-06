@@ -38,6 +38,7 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
     CREATE TABLE IF NOT EXISTS campaign_items (
       id TEXT PRIMARY KEY,
       campaign_id TEXT NOT NULL,
+      organization_id TEXT, -- cuarta fase: aislamiento a nivel de fila (heredada de la campaña)
       contact_phone TEXT NOT NULL,
       contact_name TEXT,
       variables_json TEXT,
@@ -116,6 +117,26 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
   if (!leadCols.includes('organization_id')) {
     db.exec(`ALTER TABLE realtime_leads ADD COLUMN organization_id TEXT`)
   }
+
+  // ============================================================
+  // v5 — CUARTA FASE CORRECTIVA: campaign_items.organization_id (fila)
+  //  Defensa en profundidad a nivel de fila: cada ítem hereda la organización
+  //  de SU campaña (backfill determinista por JOIN, no atribución inventada).
+  //  Los huérfanos (campaña inexistente) quedan NULL y AISLADOS: jamás se
+  //  reclaman ni despachan. El worker excluye filas cuya org difiere de la de
+  //  su campaña (filas corruptas en cuarentena, sin despacho).
+  //  (rollback: ALTER TABLE campaign_items DROP COLUMN organization_id;)
+  // ============================================================
+  if (!itemCols.includes('organization_id')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN organization_id TEXT`)
+    // Backfill determinista: el ítem pertenece a la organización de SU campaña.
+    db.exec(`
+      UPDATE campaign_items
+      SET organization_id = (SELECT c.organization_id FROM campaigns c WHERE c.id = campaign_items.campaign_id)
+      WHERE organization_id IS NULL
+    `)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_items_org ON campaign_items(organization_id, status)`)
 
   // ============================================================
   // v4 — TERCERA REPARACIÓN (5.B): SUPRESIÓN Y FATIGA POR ORGANIZACIÓN

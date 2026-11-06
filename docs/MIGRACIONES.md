@@ -5,6 +5,29 @@ Rama: `fix/tercera-reparacion-integral` · Base: `fix/segunda-reparacion-integra
 Todas las migraciones de esta rama son **aditivas y reversibles**. No se
 modifica ni se borra ninguna columna/tabla existente.
 
+## M-v5 (CUARTA FASE CORRECTIVA) — campaign_items.organization_id (aislamiento a nivel de fila)
+
+- `campaign_items.organization_id` (columna nueva, TEXT, nullable, migración
+  ADITIVA: `ALTER TABLE ... ADD COLUMN organization_id TEXT`) + índice
+  `(organization_id, status)`.
+- **Backfill determinista** (no atribución inventada): cada ítem hereda la
+  organización de SU campaña (`UPDATE ... SET organization_id = (SELECT
+  c.organization_id FROM campaigns c WHERE c.id = campaign_items.campaign_id)
+  WHERE organization_id IS NULL`). Ítems huérfanos (campaña inexistente)
+  quedan NULL y AISLADOS: jamás se reclaman ni despachan.
+- **Cuarentena en el worker**: el claim y el conteo de pendientes excluyen las
+  filas cuya organization_id difiere de la de su campaña (filas corruptas se
+  ignoran sin despacho). Los ítems NUEVOS (CSV y webhook) nacen con la
+  organización de su campaña (subconsulta en el INSERT).
+- Rollback exacto:
+
+```bash
+sqlite3 db/broadcast.db "DROP INDEX IF EXISTS idx_items_org;
+ALTER TABLE campaign_items DROP COLUMN organization_id;"
+# Al revertir el código, el worker vuelve al JOIN con campaigns (fase 3) sin
+# pérdida de aislamiento lógico (la columna era defensa en profundidad).
+```
+
 ## M-v4 (TERCERA REPARACIÓN) — Supresión y fatiga POR ORGANIZACIÓN (5.B)
 
 **Propósito:** la lista de bajas y la fatiga comercial eran GLOBALES por

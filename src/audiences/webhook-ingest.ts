@@ -88,9 +88,9 @@ export class WebhookLeadIngester {
         const idempotencyKey = createHash('sha256').update(`${payload.campaignId}_${canonical}`).digest('hex')
         try {
           this.db.prepare(`
-            INSERT INTO campaign_items (id, campaign_id, contact_phone, contact_name, variables_json, status, retry_count, idempotency_key)
-            VALUES (?, ?, ?, ?, ?, 'PENDING', 0, ?)
-          `).run(itemId, payload.campaignId, canonical, payload.name || null, payload.variables ? JSON.stringify(payload.variables) : null, idempotencyKey)
+            INSERT INTO campaign_items (id, campaign_id, organization_id, contact_phone, contact_name, variables_json, status, retry_count, idempotency_key)
+            VALUES (?, ?, (SELECT organization_id FROM campaigns WHERE id = ?), ?, ?, ?, 'PENDING', 0, ?)
+          `).run(itemId, payload.campaignId, payload.campaignId, canonical, payload.name || null, payload.variables ? JSON.stringify(payload.variables) : null, idempotencyKey)
           this.db.prepare('UPDATE campaigns SET total_targets = total_targets + 1 WHERE id = ?').run(payload.campaignId)
         } catch {
           // Si ya existe en la campaña, se omite por idempotencia
