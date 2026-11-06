@@ -73,7 +73,11 @@ async function runContractsIntegrationSuite() {
 
     await new Promise<void>((r) => daemonMockServer.listen(TEST_DAEMON_PORT, r))
 
+    // El gate DOBLE del contrato §5 exige también ALLOW_REAL_DISPATCH=true en el entorno
+    // (salvaguarda física en TODOS los adaptadores; en pruebas se activa solo para el stub).
+    const prevGate = process.env.ALLOW_REAL_DISPATCH
     try {
+      process.env.ALLOW_REAL_DISPATCH = 'true'
       const dispatcher = new HttpCrmDaemonDispatcher({
         endpointUrl: `http://localhost:${TEST_DAEMON_PORT}/send`,
         secret: DAEMON_SECRET,
@@ -90,7 +94,7 @@ async function runContractsIntegrationSuite() {
       // 1.2 Error de autenticación (secret incorrecto)
       const badAuthDispatcher = new HttpCrmDaemonDispatcher({
         endpointUrl: `http://localhost:${TEST_DAEMON_PORT}/send`,
-        secret: 'wrong_secret',
+        secret: 'wrong_secret_padded_over_16_chars',
         allowRealDispatch: true,
       })
       const authErrRes = await badAuthDispatcher.dispatch('573017543786', 'Test')
@@ -124,6 +128,8 @@ async function runContractsIntegrationSuite() {
       console.log('  ✅ [PASS] TEST 1: Contrato del Daemon CRM validado exhaustivamente (Auth, 400, Malformed, Safety Guard)')
       passed++
     } finally {
+      if (typeof prevGate === 'undefined') delete process.env.ALLOW_REAL_DISPATCH
+      else process.env.ALLOW_REAL_DISPATCH = prevGate
       await new Promise<void>((r) => daemonMockServer.close(() => r()))
     }
   }

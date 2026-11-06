@@ -1,6 +1,12 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { SuppressionChecker } from '../types.ts'
+import { DEFAULT_ORG_ID } from '../db.ts'
 
+/**
+ * Supresión LOCAL multi-organización (contrato v1.1.0 §9): la baja es propiedad de la
+ * organización que la registró. Sin orgId explícito se asume la organización 'default'
+ * (compatibilidad con despliegues mono-org).
+ */
 export class LocalSuppressionStore implements SuppressionChecker {
   db: DatabaseSync
 
@@ -8,26 +14,29 @@ export class LocalSuppressionStore implements SuppressionChecker {
     this.db = db
   }
 
-  async isSuppressed(phone: string): Promise<boolean> {
-    const row = this.db.prepare('SELECT phone FROM suppression_list WHERE phone = ?').get(phone)
+  async isSuppressed(phone: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    const row = this.db.prepare('SELECT phone FROM suppression_list WHERE organization_id = ? AND phone = ?').get(orgId, phone)
     return Boolean(row)
   }
 
-  addSuppression(phone: string, reason: string = 'opt_out') {
+  addSuppression(phone: string, reason: string = 'opt_out', orgId: string = DEFAULT_ORG_ID) {
     this.db.prepare(`
-      INSERT OR REPLACE INTO suppression_list (phone, reason, created_at)
-      VALUES (?, ?, ?)
-    `).run(phone, reason, Math.floor(Date.now() / 1000))
+      INSERT OR REPLACE INTO suppression_list (organization_id, phone, reason, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(orgId, phone, reason, Math.floor(Date.now() / 1000))
   }
 }
 
 export class Http2ASuppressionChecker implements SuppressionChecker {
   baseUrl: string
   timeoutMs: number
+  /** Credencial 2B→2A (contrato §2): sin ella, 2A rechaza con 401 ⇒ fail-closed. */
+  bearerSecret: string
 
-  constructor(options?: { baseUrl?: string; timeoutMs?: number }) {
+  constructor(options?: { baseUrl?: string; timeoutMs?: number; bearerSecret?: string }) {
     this.baseUrl = options?.baseUrl || (process.env.AGENTIC_2A_URL?.replace('/api/inbound', '') || 'http://localhost:3003')
     this.timeoutMs = options?.timeoutMs || 1500
+    this.bearerSecret = options?.bearerSecret || process.env.INTERNAL_API_SECRET || ''
   }
 
   async isSuppressed(phone: string): Promise<boolean> {
@@ -35,9 +44,11 @@ export class Http2ASuppressionChecker implements SuppressionChecker {
     const url = `${this.baseUrl}/api/internal/suppression/${encodedPhone}`
 
     try {
+      const headers: Record<string, string> = { 'Accept': 'application/json' }
+      if (this.bearerSecret) headers['Authorization'] = `Bearer ${this.bearerSecret}`
       const response = await fetch(url, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers,
         signal: AbortSignal.timeout(this.timeoutMs),
       })
 
@@ -86,8 +97,8 @@ export class FatigueManager {
     this.daysThreshold = daysThreshold
   }
 
-  isFatigued(phone: string): boolean {
-    const row = this.db.prepare('SELECT last_broadcast_at FROM contact_fatigue WHERE phone = ?').get(phone) as { last_broadcast_at: number } | undefined
+  isFatigued(phone: string, orgId: string = DEFAULT_ORG_ID): boolean {
+    const row = this.db.prepare('SELECT last_broadcast_at FROM contact_fatigue WHERE organization_id = ? AND phone = ?').get(orgId, phone) as { last_broadcast_at: number } | undefined
     if (!row) return false
 
     const now = Math.floor(Date.now() / 1000)
@@ -95,11 +106,11 @@ export class FatigueManager {
     return (now - row.last_broadcast_at) < thresholdSeconds
   }
 
-  recordBroadcast(phone: string, campaignId: string) {
+  recordBroadcast(phone: string, campaignId: string, orgId: string = DEFAULT_ORG_ID) {
     const now = Math.floor(Date.now() / 1000)
     this.db.prepare(`
-      INSERT OR REPLACE INTO contact_fatigue (phone, last_broadcast_at, last_campaign_id)
-      VALUES (?, ?, ?)
-    `).run(phone, now, campaignId)
+      INSERT OR REPLACE INTO contact_fatigue (organization_id, phone, last_broadcast_at, last_campaign_id)
+      VALUES (?, ?, ?, ?)
+    `).run(orgId, phone, now, campaignId)
   }
 }

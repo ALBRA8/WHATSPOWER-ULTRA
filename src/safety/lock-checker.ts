@@ -13,11 +13,14 @@ export class Http2ALockChecker implements LockChecker {
   baseUrl: string
   timeoutMs: number
   enabled: boolean
+  /** Credencial 2B→2A (contrato §2): sin ella, 2A rechaza con 401 ⇒ fail-closed. */
+  bearerSecret: string
 
-  constructor(options?: { baseUrl?: string; timeoutMs?: number; enabled?: boolean }) {
+  constructor(options?: { baseUrl?: string; timeoutMs?: number; enabled?: boolean; bearerSecret?: string }) {
     this.enabled = options?.enabled ?? (process.env.WHATSPOWER_ENABLED !== 'false')
     this.baseUrl = options?.baseUrl || process.env.AGENTIC_2A_URL?.replace('/api/inbound', '') || 'http://localhost:3003'
     this.timeoutMs = options?.timeoutMs || 1500
+    this.bearerSecret = options?.bearerSecret || process.env.INTERNAL_API_SECRET || ''
   }
 
   async checkLock(phone: string): Promise<LockCheckResult> {
@@ -30,9 +33,11 @@ export class Http2ALockChecker implements LockChecker {
     const url = `${this.baseUrl}/api/internal/locks/${encodedPhone}`
 
     try {
+      const headers: Record<string, string> = { 'Accept': 'application/json' }
+      if (this.bearerSecret) headers['Authorization'] = `Bearer ${this.bearerSecret}`
       const response = await fetch(url, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers,
         signal: AbortSignal.timeout(this.timeoutMs),
       })
 

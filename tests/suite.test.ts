@@ -161,8 +161,8 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
     const suppressionStore = new LocalSuppressionStore(db)
 
-    // Registrar baja previa de contacto
-    suppressionStore.addSuppression('573017543786', 'Usuario solicitó BAJA')
+    // Registrar baja previa de contacto (scoped a la organización de la campaña — contrato §9)
+    suppressionStore.addSuppression('573017543786', 'Usuario solicitó BAJA', 'org_test_1')
 
     const engine = new BroadcastEngine({
       db,

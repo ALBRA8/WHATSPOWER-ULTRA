@@ -20,7 +20,7 @@ export type CampaignItemStatus =
   | 'DISPATCHING'
   | 'SENT'
   | 'FAILED_RETRYABLE'
-  | 'FAILED_FATAL'
+  | 'FAILED'
   | 'ABORTED_LOCK_ACTIVE'
   | 'SKIPPED_LOCK_UNAVAILABLE'
   | 'SKIPPED_SUPPRESSION_UNAVAILABLE'
@@ -80,7 +80,7 @@ export interface LockChecker {
 }
 
 export interface SuppressionChecker {
-  isSuppressed(phone: string): Promise<boolean>
+  isSuppressed(phone: string, orgId?: string): Promise<boolean>
 }
 
 export interface FatiguePolicy {

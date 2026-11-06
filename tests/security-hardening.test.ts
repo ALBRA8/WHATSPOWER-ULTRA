@@ -227,13 +227,17 @@ describe('ENUM/OWN: sin enumeración cross-org, ownership en cada operación', (
   })
 })
 
-describe('WH: ingesta de leads firmada', () => {
+describe('WH: ingesta de leads firmada (HMAC v2)', () => {
   const lead = JSON.stringify({
+    eventId: 'evt_wh_lead_001',
     campaignId: 'cmp_lead_test',
     source: 'custom_webhook',
     phone: '573000001122',
     name: 'Lead Firmado',
   })
+  // Firma v2 (contrato §3): hex = HMAC-SHA256(secret, timestamp + "." + body)
+  const signV2 = (secret: string, body: string, ts: string) =>
+    createHmac('sha256', secret).update(`${ts}.${body}`, 'utf8').digest('hex')
 
   it('WH-01: webhook-lead sin firma → 401/503 (antes inyectaba leads anónimos)', async () => {
     process.env.WEBHOOK_LEAD_SECRET = 'ultra_test_lead_secret_min24chars_0'
@@ -256,7 +260,7 @@ describe('WH: ingesta de leads firmada', () => {
         const res = await authFetch(base, '/api/audiences/webhook-lead', undefined, {
           method: 'POST',
           headers: {
-            'X-Signature-SHA256': createHmac('sha256', process.env.WEBHOOK_LEAD_SECRET).update(lead).digest('hex'),
+            'X-Signature-SHA256': signV2(process.env.WEBHOOK_LEAD_SECRET!, lead, String(Date.now())),
             'X-Timestamp': String(Date.now()),
           },
           body: lead,
@@ -272,9 +276,10 @@ describe('WH: ingesta de leads firmada', () => {
       const server = boot()
       const base = await listenEphemeral(server)
       try {
+        const ts = String(Date.now())
         const headers = {
-          'X-Signature-SHA256': createHmac('sha256', process.env.WEBHOOK_LEAD_SECRET).update(lead).digest('hex'),
-          'X-Timestamp': String(Date.now()),
+          'X-Signature-SHA256': signV2(process.env.WEBHOOK_LEAD_SECRET!, lead, ts),
+          'X-Timestamp': ts,
         }
         await authFetch(base, '/api/audiences/webhook-lead', undefined, { method: 'POST', headers, body: lead })
         const r2 = await authFetch(base, '/api/audiences/webhook-lead', undefined, { method: 'POST', headers, body: lead })

@@ -1,6 +1,8 @@
 import { Http2ALockChecker } from './safety/lock-checker.ts'
 import { Http2ASuppressionChecker } from './safety/suppression.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
+import { validatePilotPreconditions } from './pilot-config.ts'
+import { maskPhone } from './security.ts'
 
 async function executeSingleSupervisedPilot() {
   console.log('============================================================')
@@ -16,8 +18,16 @@ async function executeSingleSupervisedPilot() {
     process.exit(1)
   }
 
-  console.log(`[Paso 1] Destinatario validado: ${TARGET_PHONE}`)
-  console.log(`[Paso 1] Mensaje exacto: "${EXACT_TEXT}"`)
+  console.log(`[Paso 1] Destinatario validado: ${maskPhone(TARGET_PHONE)} (configuración autorizada del piloto)`)
+  console.log('[Paso 1] Mensaje exacto: (texto fijado por la configuración del piloto)')
+
+  // GATE OBLIGATORIO del piloto (contrato §5): la autorización de piloto manda —
+  // sin pilot-config autorizado, la ejecución se aborta ANTES de cualquier check.
+  const preconditions = validatePilotPreconditions()
+  if (!preconditions.canExecute) {
+    console.error(`PILOT_NOT_AUTHORIZED: ${preconditions.blockers.join(' | ')}`)
+    process.exit(1)
+  }
 
   // 1. Verificación obligatoria de destinatario
   if (TARGET_PHONE !== '573017543786') {
@@ -98,7 +108,7 @@ async function executeSingleSupervisedPilot() {
   console.log('============================================================')
   console.log('  REPORTE FINAL DE EJECUCIÓN PILOTO C2B')
   console.log('============================================================')
-  console.log(`Destinatario: ${TARGET_PHONE}`)
+  console.log(`Destinatario: ${maskPhone(TARGET_PHONE)}`)
   console.log(`JIT Lock Check: ${lockResult.available ? 'LIBRE (OK)' : 'BLOQUEADO'}`)
   console.log(`JIT Suppression Check: ${!isSuppressed ? 'NO SUPRIMIDO (OK)' : 'SUPRIMIDO'}`)
   console.log(`Estado Final: ${finalStatus}`)
