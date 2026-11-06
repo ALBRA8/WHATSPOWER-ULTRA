@@ -30,6 +30,7 @@ export type CampaignItemStatus =
   | 'SKIPPED_LOCK_UNAVAILABLE'
   | 'SKIPPED_SUPPRESSION_UNAVAILABLE'
   | 'UNCERTAIN_DISPATCH'
+  | 'QUARANTINED_NO_ORG'
 
 export interface Campaign {
   id: string
@@ -50,6 +51,8 @@ export interface Campaign {
 export interface CampaignItem {
   id: string
   campaignId: string
+  /** B4: organización del ítem (NULL/undefined = sin identidad → cuarentena, jamás despacho). */
+  organizationId?: string
   contactPhone: string
   contactName?: string
   variables?: Record<string, string>

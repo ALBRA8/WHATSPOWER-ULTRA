@@ -74,6 +74,7 @@ export class BroadcastEngine {
         this.saveItem({
           id: itemId,
           campaignId,
+          organizationId: orgId,
           contactPhone: phone,
           contactName: contact.name,
           variables: contact.variables,
@@ -90,6 +91,7 @@ export class BroadcastEngine {
         this.saveItem({
           id: itemId,
           campaignId,
+          organizationId: orgId,
           contactPhone: phone,
           contactName: contact.name,
           variables: contact.variables,
@@ -107,6 +109,7 @@ export class BroadcastEngine {
         this.saveItem({
           id: itemId,
           campaignId,
+          organizationId: orgId,
           contactPhone: phone,
           contactName: contact.name,
           variables: contact.variables,
@@ -118,10 +121,11 @@ export class BroadcastEngine {
         continue
       }
 
-      // 4. Contacto libre: se encola como PENDING
+      // 4. Contacto libre: se encola como PENDING (SIEMPRE con su organización — B4)
       this.saveItem({
         id: itemId,
         campaignId,
+        organizationId: orgId,
         contactPhone: phone,
         contactName: contact.name,
         variables: contact.variables,
@@ -138,6 +142,7 @@ export class BroadcastEngine {
   private saveItem(item: {
     id: string
     campaignId: string
+    organizationId: string
     contactPhone: string
     contactName?: string
     variables?: Record<string, string>
@@ -147,11 +152,12 @@ export class BroadcastEngine {
   }) {
     this.db.prepare(`
       INSERT INTO campaign_items (
-        id, campaign_id, contact_phone, contact_name, variables_json, status, error_reason, retry_count, idempotency_key
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        id, campaign_id, organization_id, contact_phone, contact_name, variables_json, status, error_reason, retry_count, idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
     `).run(
       item.id,
       item.campaignId,
+      item.organizationId,
       item.contactPhone,
       item.contactName || null,
       item.variables ? JSON.stringify(item.variables) : null,
@@ -186,6 +192,7 @@ export class BroadcastEngine {
     return rows.map((r) => ({
       id: r.id,
       campaignId: r.campaign_id,
+      organizationId: r.organization_id || undefined,
       contactPhone: r.contact_phone,
       contactName: r.contact_name || undefined,
       variables: r.variables_json ? JSON.parse(r.variables_json) : undefined,
@@ -225,11 +232,21 @@ export class BroadcastEngine {
     // C. CLAIM ATÓMICO (reparación integral 2026-11-06):
     // Un ítem solo puede pasar PENDING→DISPATCHING por UN worker. El UPDATE condicional
     // es la primitiva de claim: si otro worker lo tomó primero, changes === 0.
-    const pendingExists = this.db.prepare(
-      "SELECT 1 AS x FROM campaign_items WHERE campaign_id = ? AND status = 'PENDING' LIMIT 1"
-    ).get(campaignId)
+    // B4: "pendiente" = RECLAMABLE — con organización presente y vigente; los
+    // sin-identidad o de otra org no cuentan (y se cuarentenan abajo).
+    const pendingExists = this.db.prepare(`
+      SELECT 1 AS x FROM campaign_items
+      WHERE campaign_id = ? AND status = 'PENDING'
+        AND organization_id IS NOT NULL
+        AND organization_id = (SELECT organization_id FROM campaigns WHERE id = ?)
+      LIMIT 1
+    `).get(campaignId, campaignId)
 
     if (!pendingExists) {
+      // B4: los ítems PENDING sin identidad (o de otra org) NO son reclamables:
+      // se CUARENTENAN para que el estado de la cola sea honesto y la campaña
+      // pueda drenar (jamás se despachan ni se reintentan automáticamente).
+      this.quarantineOrglessItems()
       // (segunda reparación §4.C) La campaña SOLO se marca COMPLETED cuando no
       // quedan ítems PENDING NI DISPATCHING (ítems en vuelo de otros workers):
       // antes se completaba con despachos aún en curso.
@@ -338,6 +355,27 @@ export class BroadcastEngine {
       return { processed: true, status: 'ABORTED_CAMPAIGN_NOT_RUNNING' }
     }
 
+    // F0-bis. B4 — VERIFICACIÓN 2/2 (PRE-DESPACHO, contra estado PERSISTENTE):
+    // la organización VIGENTE del ítem en BD debe existir y coincidir con la
+    // organización vigente de la campaña (la copia en memoria del claim es
+    // insuficiente: la identidad puede haber cambiado/corrupto durante los
+    // chequeos asíncronos). Sin identidad o ajena → CUARENTENA (jamás
+    // despacho, jamás reintento automático).
+    const freshItemOrg = this.db.prepare('SELECT organization_id FROM campaign_items WHERE id = ?').get(nextItem.id) as { organization_id: string | null } | undefined
+    if (!freshItemOrg?.organization_id || freshItemOrg.organization_id !== freshCampaign.organization_id) {
+      this.db.prepare(`
+        UPDATE campaign_items
+        SET status = 'QUARANTINED_NO_ORG', error_reason = ?
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(
+        `CUARENTENA B4: organización vigente del ítem (${freshItemOrg?.organization_id ?? 'NULL'}) ausente o distinta de la organización vigente de la campaña (${freshCampaign.organization_id}) — sin despacho ni reintento automático`,
+        nextItem.id,
+        this.workerId
+      )
+      this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      return { processed: true, status: 'QUARANTINED_NO_ORG' }
+    }
+
     // F. El ítem ya está en DISPATCHING desde el claim atómico; se registran
     //    el texto renderizado y el momento del check de lock.
     this.db.prepare(`
@@ -399,12 +437,21 @@ export class BroadcastEngine {
    * y reconciliación controlada.
    */
   claimNextItem(campaignId: string): { claimed: false } | { claimed: true; item: CampaignItem } {
+    // B4 — VERIFICACIÓN 1/2 (CLAIM): la organización del ítem debe existir y
+    // coincidir con la de la campaña. Filas organization_id NULL (históricas
+    // sin identidad) o de OTRA organización JAMÁS se reclaman.
+    const campaignOrg = this.db.prepare('SELECT organization_id FROM campaigns WHERE id = ?').get(campaignId) as
+      | { organization_id: string }
+      | undefined
+    if (!campaignOrg?.organization_id) return { claimed: false }
+
     const candidate = this.db.prepare(`
       SELECT id FROM campaign_items
       WHERE campaign_id = ? AND status = 'PENDING'
+        AND organization_id IS NOT NULL AND organization_id = ?
       ORDER BY rowid ASC
       LIMIT 1
-    `).get(campaignId) as { id: string } | undefined
+    `).get(campaignId, campaignOrg.organization_id) as { id: string } | undefined
 
     if (!candidate) return { claimed: false }
 
@@ -413,7 +460,8 @@ export class BroadcastEngine {
       UPDATE campaign_items
       SET status = 'DISPATCHING', claimed_by = ?, claimed_at = ?
       WHERE id = ? AND status = 'PENDING'
-    `).run(this.workerId, now, candidate.id)
+        AND organization_id IS NOT NULL AND organization_id = ?
+    `).run(this.workerId, now, candidate.id, campaignOrg.organization_id)
 
     // node:sqlite devuelve changes como number | bigint: normalizar (0n === 0 es false)
     if (Number(claimRes.changes) === 0) return { claimed: false }
@@ -429,6 +477,7 @@ export class BroadcastEngine {
     return {
       id: r.id,
       campaignId: r.campaign_id,
+      organizationId: r.organization_id || undefined,
       contactPhone: r.contact_phone,
       contactName: r.contact_name || undefined,
       variables: r.variables_json ? JSON.parse(r.variables_json) : undefined,
@@ -461,6 +510,28 @@ export class BroadcastEngine {
   }
 
   /**
+   * B4 — CUARENTENA de ítems SIN identidad válida: toda fila campaign_items
+   * en estado activo (PENDING/DISPATCHING) con organization_id NULL o con una
+   * organización DISTINTA de la de SU campaña se marca QUARANTINED_NO_ORG:
+   * jamás se reclama ni despacha, y NO se reintenta automáticamente (exige
+   * resolución humana). Idempotente; se ejecuta en el arranque
+   * (recoverFromCrash) y al drenar la cola.
+   */
+  quarantineOrglessItems(): { quarantined: number } {
+    const res = this.db.prepare(`
+      UPDATE campaign_items
+      SET status = 'QUARANTINED_NO_ORG',
+          error_reason = COALESCE(NULLIF(error_reason, '') || ' | ', '') || 'CUARENTENA B4: ítem sin organización o con organización ajena a su campaña — sin identidad no se despacha ni se reintenta'
+      WHERE status IN ('PENDING', 'DISPATCHING')
+        AND (
+          organization_id IS NULL
+          OR organization_id != (SELECT c.organization_id FROM campaigns c WHERE c.id = campaign_items.campaign_id)
+        )
+    `).run()
+    return { quarantined: Number(res.changes) }
+  }
+
+  /**
    * Procedimiento de Recuperación ante Caídas (Crash Recovery)
    */
   recoverFromCrash() {
@@ -477,6 +548,9 @@ export class BroadcastEngine {
       WHERE status = 'DISPATCHING' AND (claimed_at IS NULL OR claimed_at < ?)
     `).run(staleCutoff)
 
-    return { recoveredCount: Number(result.changes) }
+    // B4: los ítems sin organización quedan en CUARENTENA (nunca se reintentan)
+    const quarantined = this.quarantineOrglessItems()
+
+    return { recoveredCount: Number(result.changes), quarantinedCount: quarantined.quarantined }
   }
 }

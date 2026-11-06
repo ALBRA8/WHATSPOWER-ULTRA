@@ -112,6 +112,22 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
   if (!itemCols.includes('claimed_at')) {
     db.exec(`ALTER TABLE campaign_items ADD COLUMN claimed_at INTEGER`)
   }
+  // B4 — ORGANIZACIÓN EN CADA ÍTEM (identidad verificable en claim y despacho):
+  //  - campaign_items.organization_id: la org del ítem, escrita SIEMPRE al crear.
+  //  - Migración histórica: los ítems existentes heredan la organización de SU
+  //    campaña (la única fuente de verdad previa). Los ítems huérfanos (sin
+  //    campaña existente) quedan organization_id NULL y son CUARENTENADOS por
+  //    quarantineOrglessItems() al arrancar: jamás se reclaman ni despachan.
+  //  (rollback: ALTER TABLE campaign_items DROP COLUMN organization_id;)
+  if (!itemCols.includes('organization_id')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN organization_id TEXT`)
+  }
+  db.exec(`
+    UPDATE campaign_items
+    SET organization_id = (SELECT c.organization_id FROM campaigns c WHERE c.id = campaign_items.campaign_id)
+    WHERE organization_id IS NULL
+      AND EXISTS (SELECT 1 FROM campaigns c2 WHERE c2.id = campaign_items.campaign_id AND c2.organization_id IS NOT NULL)
+  `)
   const leadCols = (db.prepare('PRAGMA table_info(realtime_leads)').all() as Array<{ name: string }>).map((c) => c.name)
   if (!leadCols.includes('organization_id')) {
     db.exec(`ALTER TABLE realtime_leads ADD COLUMN organization_id TEXT`)
