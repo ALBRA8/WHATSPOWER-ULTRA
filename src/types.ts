@@ -70,6 +70,10 @@ export interface DispatchResult {
   uncertain?: boolean
 }
 
+export interface Dispatcher {
+  dispatch(to: string, text: string): Promise<DispatchResult>
+}
+
 export interface LockCheckResult {
   available: boolean
   state?: string
