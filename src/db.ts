@@ -13,6 +13,10 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
 
   const db = new DatabaseSync(targetPath)
 
+  // (tercera reparación) WAL para concurrencia REAL multi-worker/réplica sobre el
+  // mismo archivo (workers concurrentes + recuperación sin bloqueos de escritura).
+  db.exec(`PRAGMA journal_mode=WAL;`)
+
   // Esquema SQLite privado de Capa 2B
   db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
