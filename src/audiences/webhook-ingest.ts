@@ -42,13 +42,16 @@ export class WebhookLeadIngester {
       return { success: false, reason: 'INVALID_PHONE_FORMAT' }
     }
 
-    // Binding cross-org: la campaña referenciada debe pertenecer a la org autenticada.
+    // Binding cross-org: la campaña referenciada debe existir Y pertenecer a la
+    // organización autenticada (segunda reparación §4.D: un webhook jamás
+    // inserta leads huérfanos — campañas inexistentes — ni cross-org).
     if (payload.campaignId) {
       const campaign = this.db.prepare('SELECT id, organization_id, status FROM campaigns WHERE id = ?').get(payload.campaignId) as any
-      if (campaign) {
-        if (!org || org === LEGACY_LEAD_ORG || campaign.organization_id !== org) {
-          return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_ORG_MISMATCH' }
-        }
+      if (!campaign) {
+        return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_NOT_FOUND' }
+      }
+      if (!org || org === LEGACY_LEAD_ORG || campaign.organization_id !== org) {
+        return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_ORG_MISMATCH' }
       }
     }
 

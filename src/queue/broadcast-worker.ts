@@ -11,6 +11,7 @@ import { parseAudienceCsv } from '../audiences/csv-importer.ts'
 import { renderSpintax } from '../engine/spintax.ts'
 import { FatigueManager, LocalSuppressionStore } from '../safety/suppression.ts'
 import { Throttler, type ThrottlerOptions } from './throttler.ts'
+import { isDispatchableStatus } from './campaign-lifecycle.ts'
 
 export interface CreateCampaignOptions {
   organizationId: string
@@ -228,10 +229,18 @@ export class BroadcastEngine {
     ).get(campaignId)
 
     if (!pendingExists) {
-      // Si no quedan ítems PENDING, la campaña se marca COMPLETED
-      const now = Math.floor(Date.now() / 1000)
-      this.db.prepare("UPDATE campaigns SET status = 'COMPLETED', finished_at = ? WHERE id = ?").run(now, campaignId)
-      return { processed: false, status: 'COMPLETED' }
+      // (segunda reparación §4.C) La campaña SOLO se marca COMPLETED cuando no
+      // quedan ítems PENDING NI DISPATCHING (ítems en vuelo de otros workers):
+      // antes se completaba con despachos aún en curso.
+      const inFlight = this.db.prepare(
+        "SELECT 1 AS x FROM campaign_items WHERE campaign_id = ? AND status = 'DISPATCHING' LIMIT 1"
+      ).get(campaignId)
+      if (!inFlight) {
+        const now = Math.floor(Date.now() / 1000)
+        this.db.prepare("UPDATE campaigns SET status = 'COMPLETED', finished_at = ? WHERE id = ? AND status IN ('RUNNING','DRAFT')").run(now, campaignId)
+        return { processed: false, status: 'COMPLETED' }
+      }
+      return { processed: false, status: 'ITEMS_IN_FLIGHT' }
     }
 
     const claim = this.claimNextItem(campaignId)
@@ -241,10 +250,11 @@ export class BroadcastEngine {
     }
     const nextItem = claim.item as any
 
-    // Marcar como RUNNING si estaba DRAFT
+    // Marcar como RUNNING si estaba DRAFT — CONDICIONAL: si la campaña fue
+    // cancelada/pausada durante el claim, el UPDATE no aplica (guard de estado).
     if (campaign.status === 'DRAFT') {
       const now = Math.floor(Date.now() / 1000)
-      this.db.prepare("UPDATE campaigns SET status = 'RUNNING', started_at = ? WHERE id = ?").run(now, campaignId)
+      this.db.prepare("UPDATE campaigns SET status = 'RUNNING', started_at = ? WHERE id = ? AND status = 'DRAFT'").run(now, campaignId)
     }
 
     const phone = nextItem.contactPhone
@@ -308,6 +318,22 @@ export class BroadcastEngine {
     }
 
     const renderedText = renderSpintax(campaign.templateSpintax, { seed, variables })
+
+    // F0. (segunda reparación §4.B) RE-CHECK DE ESTADO Y OWNERSHIP JUSTO ANTES
+    // DEL DESPACHO: la campaña puede haberse pausado/cancelado DURANTE los
+    // chequeos asíncronos anteriores (supresión/lock son await). Solo se
+    // despacha si el estado VIGENTE en BD sigue despachable; si no, el ítem se
+    // aborta SIN enviar y se libera el cómputo.
+    const freshCampaign = this.db.prepare('SELECT status, organization_id FROM campaigns WHERE id = ?').get(campaignId) as { status: string; organization_id: string } | undefined
+    if (!freshCampaign || !isDispatchableStatus(freshCampaign.status)) {
+      this.db.prepare(`
+        UPDATE campaign_items
+        SET status = 'ABORTED_CAMPAIGN_NOT_RUNNING', error_reason = ?
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(`Campaña en estado ${freshCampaign?.status ?? 'inexistente'} al momento del despacho (pausa/cancelación respetadas)`, nextItem.id, this.workerId)
+      this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      return { processed: true, status: 'ABORTED_CAMPAIGN_NOT_RUNNING' }
+    }
 
     // F. El ítem ya está en DISPATCHING desde el claim atómico; se registran
     //    el texto renderizado y el momento del check de lock.

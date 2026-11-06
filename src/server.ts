@@ -2,6 +2,8 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { createBroadcastDatabase } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
+import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
+import { issueStudioSession, resolveStudioSession } from './security.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
@@ -89,7 +91,9 @@ export function createBroadcastServer(options?: {
     return campaign
   }
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const studioLoginAttempts = new Map<string, { count: number; resetAt: number }>()
+
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
 
     // ==============================================================
@@ -107,12 +111,52 @@ export function createBroadcastServer(options?: {
         return
       }
       identity = resolveIdentity(req.headers['authorization'], adminKeys)
+        ?? resolveStudioSession(req.headers.cookie as string | undefined, adminKeys)
       if (!identity) {
         console.warn(`[Seguridad 2B ALERTA] Acceso administrativo no autorizado: ${req.method} ${url.pathname} (IP: ${req.socket.remoteAddress})`)
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Unauthorized: credencial administrativa ausente o inválida' }))
         return
       }
+    }
+
+    // -1. (segunda reparación §4.A) Canje de sesión del Studio: el operador
+    // envía el secreto UNA vez; el backend responde con cookie HttpOnly de
+    // corta vida. El secreto de larga vida JAMÁS vuelve al navegador (antes
+    // vivía en sessionStorage: un XSS lo leía).
+    if (req.method === 'POST' && url.pathname === '/studio/login') {
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      // Throttle mínimo en memoria (10 intentos/min por IP): anti fuerza bruta
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local'
+      const nowMs = Date.now()
+      const bucket = studioLoginAttempts.get(ip)
+      if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
+      else if (++bucket.count > 10) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Demasiados intentos. Inténtalo más tarde.' }))
+        return
+      }
+      let secret = ''
+      try { secret = String(JSON.parse(rb.body).secret || '') } catch {}
+      const idx = adminKeys.findIndex((k) => k.key === secret)
+      if (idx === -1) {
+        console.warn(`[Seguridad 2B ALERTA] Studio login fallido (IP: ${req.socket.remoteAddress})`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Credencial administrativa inválida' }))
+        return
+      }
+      studioLoginAttempts.delete(ip)
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': issueStudioSession(idx, adminKeys[idx].key),
+      })
+      res.end(JSON.stringify({ ok: true, sessionTtlSeconds: 3600 }))
+      return
     }
 
     // 0. Campaign Studio UI
@@ -260,9 +304,17 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
         return
       }
-      db.prepare("UPDATE campaigns SET status = 'PAUSED' WHERE id = ?").run(campaignId)
+      // (segunda reparación §4.B) Transición CONDICIONAL y ATÓMICA: terminal
+      // (CANCELLED/COMPLETED) jamás se pausa; carrera → 409 con estado real.
+      const tr = transitionCampaignStatus(db, campaignId, identity!.org, 'PAUSED')
+      if (!tr.ok) {
+        const status = tr.code === 'NOT_FOUND' ? 404 : 409
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: tr.message, code: tr.code, currentStatus: tr.from }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, status: 'PAUSED' }))
+      res.end(JSON.stringify({ ok: true, status: 'PAUSED', previousStatus: tr.from }))
       return
     }
 
@@ -273,9 +325,17 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
         return
       }
-      db.prepare("UPDATE campaigns SET status = 'RUNNING' WHERE id = ?").run(campaignId)
+      // (segunda reparación §4.B) CANCELLED es TERMINAL: una campaña cancelada
+      // NO puede reanudarse (antes este UPDATE ciego lo permitía).
+      const tr = transitionCampaignStatus(db, campaignId, identity!.org, 'RUNNING')
+      if (!tr.ok) {
+        const status = tr.code === 'NOT_FOUND' ? 404 : 409
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: tr.message, code: tr.code, currentStatus: tr.from }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, status: 'RUNNING' }))
+      res.end(JSON.stringify({ ok: true, status: 'RUNNING', previousStatus: tr.from }))
       return
     }
 
@@ -286,9 +346,15 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
         return
       }
-      db.prepare("UPDATE campaigns SET status = 'CANCELLED' WHERE id = ?").run(campaignId)
+      const tr = transitionCampaignStatus(db, campaignId, identity!.org, 'CANCELLED')
+      if (!tr.ok) {
+        const status = tr.code === 'NOT_FOUND' ? 404 : 409
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: tr.message, code: tr.code, currentStatus: tr.from }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, status: 'CANCELLED' }))
+      res.end(JSON.stringify({ ok: true, status: 'CANCELLED', previousStatus: tr.from }))
       return
     }
 

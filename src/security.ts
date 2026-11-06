@@ -364,3 +364,61 @@ export function productionConfigProblems(env: NodeJS.ProcessEnv = process.env): 
   }
   return problems
 }
+
+// ============================================================================
+// SESIÓN DE STUDIO POR COOKIE HttpOnly (segunda reparación — orden §4.A)
+//
+// Causa raíz corregida: el Studio guardaba el secreto administrativo en
+// sessionStorage — cualquier XSS leía la credencial completa. Ahora el
+// navegador canjea el secreto UNA vez por una cookie de sesión:
+//   - HttpOnly  → invisible para JavaScript (un XSS NO puede exfiltrarla);
+//   - SameSite=Strict → no viaja en navegaciones cruzadas;
+//   - corta vida (1 h) y token HMAC stateless ligado al secreto vigente:
+//     rotar el secreto revoca todas las sesiones al instante.
+// El patrón preferido es "backend entrega sesión, no credenciales": el
+// secreto de larga vida jamás vuelve a tocar el navegador.
+// ============================================================================
+
+
+export const STUDIO_SESSION_COOKIE = 'wp_ultra_studio_session'
+export const STUDIO_SESSION_TTL_SECONDS = 3600
+
+/** Firma stateless: HMAC(secret_vigente, `${orgIndex}.${issuedAtMs}`). */
+function studioSessionToken(secret: string, orgIndex: number, issuedAtMs: number): string {
+  return createHmac('sha256', secret).update(`${orgIndex}.${issuedAtMs}`).digest('base64url')
+}
+
+/**
+ * Emite el valor de la cookie de sesión para una identidad admin (por índice).
+ * El token NO contiene el secreto: solo el índice de identidad + iat + firma.
+ */
+export function issueStudioSession(identityIndex: number, secret: string, nowMs: number = Date.now()): string {
+  const token = `${identityIndex}.${nowMs}.${studioSessionToken(secret, identityIndex, nowMs)}`
+  return `${STUDIO_SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${STUDIO_SESSION_TTL_SECONDS}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+}
+
+/**
+ * Verifica la cookie de sesión contra las identidades vigentes.
+ * Devuelve la identidad si el token es válido, reciente (≤ TTL) y la firma
+ * corresponde al secreto ACTUAL (rotación de secreto ⇒ revocación total).
+ */
+export function resolveStudioSession(cookieHeader: string | undefined, adminKeys: AdminIdentity[], nowMs: number = Date.now()): AdminIdentity | null {
+  if (!cookieHeader) return null
+  const cookies = cookieHeader.split(';').map((c) => c.trim())
+  const raw = cookies.find((c) => c.startsWith(`${STUDIO_SESSION_COOKIE}=`))
+  if (!raw) return null
+  const token = raw.slice(STUDIO_SESSION_COOKIE.length + 1)
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  const [idxStr, iatStr, sig] = parts
+  const idx = Number.parseInt(idxStr, 10)
+  const iat = Number.parseInt(iatStr, 10)
+  if (!Number.isInteger(idx) || idx < 0 || idx >= adminKeys.length || !Number.isFinite(iat)) return null
+  if (nowMs - iat > STUDIO_SESSION_TTL_SECONDS * 1000) return null
+  const identity = adminKeys[idx]
+  const expected = studioSessionToken(identity.key, idx, iat)
+  const a = Buffer.from(sig)
+  const b = Buffer.from(expected)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  return identity
+}
