@@ -100,8 +100,8 @@ describe('LIFECYCLE: máquina de estados de campañas (§4.B)', () => {
         },
       },
       lockChecker: slowLock as any,
+      workerId: 'worker_cancel_test',
     })
-    slowEngine.workerId = 'worker_cancel_test'
 
     const pRun = slowEngine.processNextItem(campaignId, new Date('2026-10-26T14:00:00'))
     // Cancelar DURANTE la ventana asíncrona del check de locks

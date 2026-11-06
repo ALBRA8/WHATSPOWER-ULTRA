@@ -47,7 +47,9 @@ export type TransitionResult =
 export function transitionCampaignStatus(
   db: DatabaseSync,
   campaignId: string,
-  organizationId: string,
+  /** Identidad de servicio (null) = autoridad de plataforma: sin filtro de org
+   *  (misma semántica que ownCampaign). Identidad con org = SOLO su org. */
+  organizationId: string | null,
   to: CampaignStatus,
   extraSet: Record<string, unknown> = {}
 ): TransitionResult {
@@ -56,7 +58,9 @@ export function transitionCampaignStatus(
     return { ok: false, code: 'ILLEGAL_TRANSITION', message: `el estado destino ${to} no admite transición` }
   }
 
-  const current = db.prepare('SELECT status FROM campaigns WHERE id = ? AND organization_id = ?').get(campaignId, organizationId) as
+  const current = (organizationId === null
+    ? db.prepare('SELECT status FROM campaigns WHERE id = ?').get(campaignId)
+    : db.prepare('SELECT status FROM campaigns WHERE id = ? AND organization_id = ?').get(campaignId, organizationId)) as
     | { status: string }
     | undefined
   if (!current) {
@@ -73,16 +77,21 @@ export function transitionCampaignStatus(
 
   const extraKeys = Object.keys(extraSet)
   const setClause = ['status = ?', ...extraKeys.map((k) => `${k} = ?`)].join(', ')
-  const params = [to, ...extraKeys.map((k) => extraSet[k])]
-  const res = db.prepare(
-    `UPDATE campaigns SET ${setClause} WHERE id = ? AND organization_id = ? AND status IN (${sources.map(() => '?').join(', ')})`
-  ).run(...params, campaignId, organizationId, ...sources)
+  const params = [to, ...extraKeys.map((k) => extraSet[k] as string | number | null)]
+  const whereOrg = organizationId === null
+    ? 'WHERE id = ? AND status IN'
+    : 'WHERE id = ? AND organization_id = ? AND status IN'
+  const res = organizationId === null
+    ? db.prepare(`UPDATE campaigns SET ${setClause} ${whereOrg} (${sources.map(() => '?').join(', ')})`).run(...params, campaignId, ...sources)
+    : db.prepare(`UPDATE campaigns SET ${setClause} ${whereOrg} (${sources.map(() => '?').join(', ')})`).run(...params, campaignId, organizationId, ...sources)
 
   // node:sqlite devuelve changes como number | bigint
   if (Number(res.changes) !== 1) {
     // Otra operación cambió el estado entre la lectura y el UPDATE (carrera):
     // la transición NO se aplicó.
-    const nowStatus = (db.prepare('SELECT status FROM campaigns WHERE id = ? AND organization_id = ?').get(campaignId, organizationId) as { status?: string } | undefined)?.status
+    const nowStatus = ((organizationId === null
+      ? db.prepare('SELECT status FROM campaigns WHERE id = ?').get(campaignId)
+      : db.prepare('SELECT status FROM campaigns WHERE id = ? AND organization_id = ?').get(campaignId, organizationId)) as { status?: string } | undefined)?.status
     return {
       ok: false,
       code: 'ILLEGAL_TRANSITION',
