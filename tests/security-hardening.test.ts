@@ -257,11 +257,13 @@ describe('WH: ingesta de leads firmada (HMAC v2)', () => {
       const server = boot()
       const base = await listenEphemeral(server)
       try {
+        // El MISMO timestamp va firmado y en la cabecera (contrato §3) — un solo Date.now()
+        const ts = String(Date.now())
         const res = await authFetch(base, '/api/audiences/webhook-lead', undefined, {
           method: 'POST',
           headers: {
-            'X-Signature-SHA256': signV2(process.env.WEBHOOK_LEAD_SECRET!, lead, String(Date.now())),
-            'X-Timestamp': String(Date.now()),
+            'X-Signature-SHA256': signV2(process.env.WEBHOOK_LEAD_SECRET!, lead, ts),
+            'X-Timestamp': ts,
           },
           body: lead,
         })
