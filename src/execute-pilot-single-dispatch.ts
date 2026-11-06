@@ -25,12 +25,17 @@ async function executeSingleSupervisedPilot() {
     process.exit(1)
   }
 
-  // 2. JIT Lock Check en Capa 2A
-  console.log('[Paso 2] Ejecutando JIT Lock Check en Capa 2A...')
+  // 2. JIT Lock Check en Capa 2A — POR ORGANIZACIÓN (tercera reparación 5.A: fail-closed sin org)
+  const PILOT_ORG = process.env.PILOT_ORG_ID
+  if (!PILOT_ORG) {
+    console.error('FAIL-CLOSED: PILOT_ORG_ID ausente — toda verificación 2A exige organización (tercera reparación 5.A). Abortando.')
+    process.exit(1)
+  }
+  console.log('[Paso 2] Ejecutando JIT Lock Check en Capa 2A (org: ' + PILOT_ORG + ')...')
   const lockChecker = new Http2ALockChecker({ baseUrl: 'http://localhost:3003', timeoutMs: 1500 })
   let lockResult
   try {
-    lockResult = await lockChecker.checkLock(TARGET_PHONE)
+    lockResult = await lockChecker.checkLock(TARGET_PHONE, PILOT_ORG)
     console.log('Resultado Lock Check:', lockResult)
     if (!lockResult.available) {
       console.error(`ABORTANDO: Contacto no disponible por lock en 2A (${lockResult.state || lockResult.error})`)
@@ -46,7 +51,7 @@ async function executeSingleSupervisedPilot() {
   const suppressionChecker = new Http2ASuppressionChecker({ baseUrl: 'http://localhost:3003', timeoutMs: 1500 })
   let isSuppressed = false
   try {
-    isSuppressed = await suppressionChecker.isSuppressed(TARGET_PHONE)
+    isSuppressed = await suppressionChecker.isSuppressed(TARGET_PHONE, PILOT_ORG)
     console.log(`Resultado Suppression Check: suppressed = ${isSuppressed}`)
     if (isSuppressed) {
       console.error('ABORTANDO: Contacto figura en lista de supresión / opt-out activo.')

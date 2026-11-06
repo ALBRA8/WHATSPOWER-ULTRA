@@ -66,10 +66,11 @@ describe('PLUG-AND-PLAY MODULARITY TESTS (ALBRA 3 Tiers)', () => {
     })
 
     // Agregar número a la lista de supresión local
+    // (tercera reparación 5.B) Supresión POR ORGANIZACIÓN (la org de la campaña)
     db.prepare(`
-      INSERT INTO suppression_list (phone, reason, created_at)
-      VALUES (?, ?, ?)
-    `).run('573009990000', 'opt_out_manual', Math.floor(Date.now() / 1000))
+      INSERT INTO suppression_list (organization_id, phone, reason, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run('org_test', '573009990000', 'opt_out_manual', Math.floor(Date.now() / 1000))
 
     const csvContent = `phone,name
 573009990000,Usuario Desuscrito`

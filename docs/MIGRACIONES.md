@@ -1,9 +1,50 @@
 # MIGRACIONES — Reparación Integral 2026-11-06 (WHATSPOWER-ULTRA)
 
-Rama: `fix/reparacion-integral` · Base: `main` @ `8d00230`
+Rama: `fix/tercera-reparacion-integral` · Base: `fix/segunda-reparacion-integral` @ `65635c0`
 
 Todas las migraciones de esta rama son **aditivas y reversibles**. No se
 modifica ni se borra ninguna columna/tabla existente.
+
+## M-v4 (TERCERA REPARACIÓN) — Supresión y fatiga POR ORGANIZACIÓN (5.B)
+
+**Propósito:** la lista de bajas y la fatiga comercial eran GLOBALES por
+teléfono (una organización silenciaba/fatigaba contactos de otra). Política
+decidida y documentada en `docs/POLITICA-SUPRESION.md`:
+
+```sql
+-- suppression_list: PK (phone) → (organization_id, phone)
+CREATE TABLE global_suppression_list (
+  phone TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
+INSERT OR IGNORE INTO global_suppression_list (phone, reason, created_at)
+  SELECT phone, 'migrado_v4: opt-out previo al aislamiento (política conservadora)', created_at
+  FROM suppression_list;   -- copia CONSERVADORA de opt-outs legacy (no se inventa org)
+ALTER TABLE suppression_list RENAME TO suppression_list_v3old;
+CREATE TABLE suppression_list (
+  organization_id TEXT NOT NULL, phone TEXT NOT NULL, reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL, PRIMARY KEY (organization_id, phone));
+DROP TABLE suppression_list_v3old;
+
+-- contact_fatigue: PK (phone) → (organization_id, phone); legacy → '__legacy__'
+ALTER TABLE contact_fatigue RENAME TO contact_fatigue_v3old;
+CREATE TABLE contact_fatigue (
+  organization_id TEXT NOT NULL, phone TEXT NOT NULL, last_broadcast_at INTEGER NOT NULL,
+  last_campaign_id TEXT NOT NULL, PRIMARY KEY (organization_id, phone));
+INSERT INTO contact_fatigue SELECT '__legacy__', phone, last_broadcast_at, last_campaign_id FROM contact_fatigue_v3old;
+DROP TABLE contact_fatigue_v3old;
+```
+
+**Rollback exacto (reversible; los opt-outs legacy se conservan en
+`global_suppression_list` hasta que se decida lo contrario):**
+
+```bash
+sqlite3 db/broadcast.db "DROP TABLE IF EXISTS suppression_list;
+CREATE TABLE suppression_list (phone TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
+-- (opcional) recuperar bajas por-org como globales:
+-- INSERT OR IGNORE INTO suppression_list SELECT phone, reason, created_at FROM suppression_list_v3old;
+DROP TABLE IF EXISTS contact_fatigue;
+CREATE TABLE contact_fatigue (phone TEXT PRIMARY KEY, last_broadcast_at INTEGER NOT NULL, last_campaign_id TEXT NOT NULL);
+DROP TABLE IF EXISTS global_suppression_list;"
+```
 
 ## M1 — `campaign_items.claimed_by` / `campaign_items.claimed_at`
 

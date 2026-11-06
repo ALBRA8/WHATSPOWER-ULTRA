@@ -137,7 +137,10 @@ async function runContractsIntegrationSuite() {
     const suppressionStore = new Set<string>()
     let simulate500 = false
     let simulateTimeout = false
+    /** (tercera reparación 5.A) Simular servidor 2A con contrato viejo (sin eco de org) */
+    let simulateLegacyNoEcho = false
 
+    // Mock 2A con el CONTRATO VIGENTE: exige X-Org-Id y hace eco de la organización
     const mock2AServer = createServer((req, res) => {
       if (simulateTimeout) return // No responder para forzar timeout
 
@@ -147,21 +150,37 @@ async function runContractsIntegrationSuite() {
         return
       }
 
+      const orgHeader = String(req.headers['x-org-id'] || '')
+      if (!orgHeader) {
+        // Contrato vigente de Capa 2A: sin X-Org-Id → 400
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'x-org-id requerido (aislamiento multi-organización)' }))
+        return
+      }
+
       // Endpoint Locks
       if (req.method === 'GET' && req.url?.startsWith('/api/internal/locks/')) {
         const phone = decodeURIComponent(req.url.replace('/api/internal/locks/', ''))
-        const lock = locksStore.get(phone)
+        const lock = locksStore.get(`${orgHeader}\u0000${phone}`)
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ phone, locked: Boolean(lock), lock: lock || null }))
+        if (simulateLegacyNoEcho) {
+          res.end(JSON.stringify({ phone, locked: Boolean(lock), lock: lock || null }))
+        } else {
+          res.end(JSON.stringify({ phone, locked: Boolean(lock), lock: lock || null, organizationId: orgHeader }))
+        }
         return
       }
 
       // Endpoint Supresión
       if (req.method === 'GET' && req.url?.startsWith('/api/internal/suppression/')) {
         const phone = decodeURIComponent(req.url.replace('/api/internal/suppression/', ''))
-        const suppressed = suppressionStore.has(phone)
+        const suppressed = suppressionStore.has(`${orgHeader}\u0000${phone}`)
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ phone, suppressed }))
+        if (simulateLegacyNoEcho) {
+          res.end(JSON.stringify({ phone, suppressed }))
+        } else {
+          res.end(JSON.stringify({ phone, suppressed, organizationId: orgHeader }))
+        }
         return
       }
 
@@ -180,44 +199,69 @@ async function runContractsIntegrationSuite() {
         baseUrl: `http://localhost:${TEST_2A_PORT}`,
         timeoutMs: 800,
       })
+      const ORG_A = 'org_alpha'
+      const ORG_B = 'org_beta'
 
-      // 2.1 Contacto libre
-      const freeLock = await lockChecker.checkLock('573017543786')
+      // 2.0 Fail-closed de contexto: sin organización NO se consulta
+      const noCtx = await lockChecker.checkLock('573017543786', '')
+      assert.strictEqual(noCtx.available, false)
+      assert.ok(noCtx.error?.includes('TENANT_CONTEXT_INVALID'))
+      await assert.rejects(() => suppressionChecker.isSuppressed('573017543786', ''))
+
+      // 2.1 Contacto libre (org A)
+      const freeLock = await lockChecker.checkLock('573017543786', ORG_A)
       assert.strictEqual(freeLock.available, true)
 
-      // 2.2 Contacto en IN_FLOW_2A
-      locksStore.set('573017543786', { current_state: 'IN_FLOW_2A' })
-      const busyLock = await lockChecker.checkLock('573017543786')
-      assert.strictEqual(busyLock.available, false)
-      assert.strictEqual(busyLock.state, 'IN_FLOW_2A')
+      // 2.1b Aislamiento: org B ve libre el MISMO teléfono aunque org A esté en lock
+      locksStore.set(`${ORG_A}\u0000573017543786`, { current_state: 'IN_FLOW_2A' })
+      const busyA = await lockChecker.checkLock('573017543786', ORG_A)
+      assert.strictEqual(busyA.available, false)
+      assert.strictEqual(busyA.state, 'IN_FLOW_2A')
+      const freeB = await lockChecker.checkLock('573017543786', ORG_B)
+      assert.strictEqual(freeB.available, true, 'el lock de org A NO bloquea a org B')
 
-      // 2.3 Contacto en HANDOFF_HUMAN
-      locksStore.set('573017543786', { current_state: 'HANDOFF_HUMAN' })
-      const handoffLock = await lockChecker.checkLock('573017543786')
+      // 2.3 Contacto en HANDOFF_HUMAN (org A)
+      locksStore.set(`${ORG_A}\u0000573017543786`, { current_state: 'HANDOFF_HUMAN' })
+      const handoffLock = await lockChecker.checkLock('573017543786', ORG_A)
       assert.strictEqual(handoffLock.available, false)
       assert.strictEqual(handoffLock.state, 'HANDOFF_HUMAN')
-      locksStore.delete('573017543786')
+      locksStore.delete(`${ORG_A}\u0000573017543786`)
 
       // 2.4 Fail-Closed ante error 500 de Capa 2A
       simulate500 = true
-      const errLock = await lockChecker.checkLock('573017543786')
+      const errLock = await lockChecker.checkLock('573017543786', ORG_A)
       assert.strictEqual(errLock.available, false)
       assert.ok(errLock.error?.includes('500'))
 
       await assert.rejects(async () => {
-        await suppressionChecker.isSuppressed('573017543786')
+        await suppressionChecker.isSuppressed('573017543786', ORG_A)
       })
       simulate500 = false
 
       // 2.5 Fail-Closed ante Timeout de Capa 2A
       simulateTimeout = true
-      const timeoutLock = await lockChecker.checkLock('573017543786')
+      const timeoutLock = await lockChecker.checkLock('573017543786', ORG_A)
       assert.strictEqual(timeoutLock.available, false)
       assert.ok(timeoutLock.error?.includes('LOCK_UNAVAILABLE'))
       assert.ok(timeoutLock.error?.toLowerCase().includes('timeout') || timeoutLock.error?.toLowerCase().includes('aborted'))
       simulateTimeout = false
 
-      console.log('  ✅ [PASS] TEST 2: Contrato 2A validado (IN_FLOW_2A, HANDOFF_HUMAN, Fail-Closed en 500 y Timeout)')
+      // 2.6 (tercera reparación 5.A) Contrato roto: respuesta SIN eco de organización
+      //     → RECHAZADA (jamás se confunde con "disponible")
+      simulateLegacyNoEcho = true
+      const legacyLock = await lockChecker.checkLock('573017543786', ORG_A)
+      assert.strictEqual(legacyLock.available, false, 'respuesta sin eco de org NO se acepta como libre')
+      assert.ok(legacyLock.error?.includes('TENANT_UNVERIFIED'))
+      assert.strictEqual(legacyLock.contractError, true)
+      await assert.rejects(() => suppressionChecker.isSuppressed('573017543786', ORG_A), /TENANT_UNVERIFIED/)
+      simulateLegacyNoEcho = false
+
+      // 2.7 (5.B) Supresión POR ORGANIZACIÓN: la baja de org A no silencia en org B
+      suppressionStore.add(`${ORG_A}\u0000573017543786`)
+      assert.strictEqual(await suppressionChecker.isSuppressed('573017543786', ORG_A), true)
+      assert.strictEqual(await suppressionChecker.isSuppressed('573017543786', ORG_B), false, 'la baja de org A NO silencia a org B')
+
+      console.log('  ✅ [PASS] TEST 2: Contrato 2A v2 validado (X-Org-Id obligatorio, eco de org, aislamiento, fail-closed 500/timeout/contrato roto)')
       passed++
     } finally {
       await new Promise<void>((r) => mock2AServer.close(() => r()))
@@ -243,7 +287,8 @@ async function runContractsIntegrationSuite() {
     let isRemoteSuppressed = false
     let throwSuppressionError = false
     const dynamicRemoteSuppression = {
-      async isSuppressed(phone: string) {
+      async isSuppressed(phone: string, organizationId: string) {
+        void organizationId
         if (throwSuppressionError) throw new Error('SUPPRESSION_SERVICE_TIMEOUT_SIMULATED')
         return isRemoteSuppressed
       },
@@ -253,7 +298,8 @@ async function runContractsIntegrationSuite() {
 
     let isRemoteLocked = false
     const dynamicLockChecker = {
-      async checkLock(phone: string) {
+      async checkLock(phone: string, organizationId: string) {
+        void organizationId
         if (isRemoteLocked) return { available: false, state: 'IN_FLOW_2A' }
         return { available: true }
       },
@@ -304,8 +350,8 @@ async function runContractsIntegrationSuite() {
   // --------------------------------------------------------------------------
   {
     const db = createBroadcastDatabase(':memory:')
-    const lockChecker = { async checkLock() { return { available: true } } }
-    const suppression = { async isSuppressed() { return false } }
+    const lockChecker = { async checkLock(_p: string, _o: string) { return { available: true } } }
+    const suppression = { async isSuppressed(_p: string, _o: string) { return false } }
 
     // Dispatcher que simula resultado incierto (Timeout / Red cortada tras enviar)
     const uncertainDispatcher = {

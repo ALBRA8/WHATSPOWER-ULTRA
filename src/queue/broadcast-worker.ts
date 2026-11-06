@@ -62,14 +62,15 @@ export class BroadcastEngine {
     `).run(campaignId, opts.organizationId, opts.name, opts.templateSpintax, importResult.contacts.length, now)
 
     let skippedCount = 0
+    const orgId = opts.organizationId
 
     for (const contact of importResult.contacts) {
       const phone = contact.phone
       const itemId = `itm_${randomUUID()}`
       const idempotencyKey = createHash('sha256').update(`${campaignId}_${phone}`).digest('hex')
 
-      // 1. Pre-filtrado de Supresión (Bajas)
-      if (await this.suppressionStore.isSuppressed(phone)) {
+      // 1. Pre-filtrado de Supresión (Bajas) — POR ORGANIZACIÓN (tercera reparación 5.B)
+      if (await this.suppressionStore.isSuppressed(phone, orgId)) {
         this.saveItem({
           id: itemId,
           campaignId,
@@ -84,8 +85,8 @@ export class BroadcastEngine {
         continue
       }
 
-      // 2. Pre-filtrado de Fatiga (Máximo 1 broadcast cada 7 días)
-      if (this.fatigueManager.isFatigued(phone)) {
+      // 2. Pre-filtrado de Fatiga (Máximo 1 broadcast cada 7 días) — por organización
+      if (this.fatigueManager.isFatigued(phone, orgId)) {
         this.saveItem({
           id: itemId,
           campaignId,
@@ -100,8 +101,8 @@ export class BroadcastEngine {
         continue
       }
 
-      // 3. Pre-filtrado de Locks de Conversación en Capa 2A (Fase 1)
-      const lockRes = await this.lockChecker.checkLock(phone)
+      // 3. Pre-filtrado de Locks de Conversación en Capa 2A (Fase 1) — de ESTA org
+      const lockRes = await this.lockChecker.checkLock(phone, orgId)
       if (!lockRes.available) {
         this.saveItem({
           id: itemId,
@@ -261,8 +262,9 @@ export class BroadcastEngine {
     const checkNow = Math.floor(Date.now() / 1000)
 
     // D1. FASE 2: Comprobación Just-In-Time de Supresiones / Bajas (< 50 ms antes del despacho)
+    // (tercera reparación 5.A) SIEMPRE con la organización de la CAMPAÑA.
     try {
-      const isSupp = await this.suppressionStore.isSuppressed(phone)
+      const isSupp = await this.suppressionStore.isSuppressed(phone, campaign.organizationId)
       if (isSupp) {
         this.db.prepare(`
           UPDATE campaign_items
@@ -284,7 +286,8 @@ export class BroadcastEngine {
     }
 
     // D2. FASE 2: Comprobación Just-In-Time de Locks (< 50 ms antes del despacho)
-    const lockRes = await this.lockChecker.checkLock(phone)
+    // (tercera reparación 5.A) El lock consultado es el de (org de la campaña, teléfono)
+    const lockRes = await this.lockChecker.checkLock(phone, campaign.organizationId)
 
     if (!lockRes.available) {
       // 1. Si Capa 2A reporta lock activo: se aborta el despacho
@@ -356,7 +359,7 @@ export class BroadcastEngine {
       `).run(dispatchTime, dispatchRes.messageId || null, nextItem.id, this.workerId)
 
       this.db.prepare('UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ?').run(campaignId)
-      this.fatigueManager.recordBroadcast(phone, campaignId)
+      this.fatigueManager.recordBroadcast(phone, campaignId, campaign.organizationId)
       this.throttler.registerDispatch()
 
       return { processed: true, status: 'SENT' }

@@ -85,7 +85,8 @@ async function runBajasCircuitTest() {
     }
 
     const mockLockChecker = {
-      async checkLock(phone: string) {
+      async checkLock(phone: string, organizationId: string) {
+        void organizationId
         return { available: true }
       },
     }

@@ -143,8 +143,8 @@ async function runPilotSafeguardsSuite() {
     const engine = new BroadcastEngine({
       db,
       dispatcher: mockDispatcher as any,
-      lockChecker: { async checkLock() { return { available: true } } },
-      suppressionStore: { async isSuppressed() { return false } },
+      lockChecker: { async checkLock(_p: string, _o: string) { return { available: true } } },
+      suppressionStore: { async isSuppressed(_p: string, _o: string) { return false } },
     })
 
     const campaign = await engine.createCampaign({
@@ -176,8 +176,8 @@ async function runPilotSafeguardsSuite() {
     const engine = new BroadcastEngine({
       db,
       dispatcher: mockDispatcher as any,
-      lockChecker: { async checkLock() { return { available: true } } },
-      suppressionStore: { async isSuppressed() { return false } },
+      lockChecker: { async checkLock(_p: string, _o: string) { return { available: true } } },
+      suppressionStore: { async isSuppressed(_p: string, _o: string) { return false } },
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
