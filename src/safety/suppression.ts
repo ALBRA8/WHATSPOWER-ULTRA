@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { bearerForOrg } from './lock-checker.ts'
 import type { SuppressionChecker } from '../types.ts'
 
 /**
@@ -107,9 +108,12 @@ export class Http2ASuppressionChecker implements SuppressionChecker {
         'Accept': 'application/json',
         'X-Org-Id': organizationId,
       }
-      if (process.env.INTERNAL_API_SECRET) {
-        headers['Authorization'] = `Bearer ${process.env.INTERNAL_API_SECRET}`
+      const bearer = bearerForOrg(organizationId)
+      if (!bearer) {
+        // Fail-closed: sin credencial para esta organización no se consulta
+        throw new Error('TENANT_UNAUTHENTICATED: sin credencial 2A para la organización de la campaña')
       }
+      headers['Authorization'] = `Bearer ${bearer}`
       const response = await fetch(url, {
         method: 'GET',
         headers,

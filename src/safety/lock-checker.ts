@@ -24,6 +24,23 @@ export class StandaloneLockChecker implements LockChecker {
  *  - HTTP != 200 → fail-closed (no despachar).
  *  - Timeout/red → fail-closed (no despachar).
  */
+/**
+ * CUARTA FASE — IDENTIDAD POR ORGANIZACIÓN hacia la Capa 2A.
+ * `AGENTIC_2A_KEYS = {"orgA":"clave(≥16)","orgB":"..."}`: si la organización de
+ * la campaña tiene clave dedicada, SE USA ESA (la identidad de la org viaja en
+ * la credencial, no solo en el header). Si no la tiene, se usa el secreto
+ * compartido INTERNAL_API_SECRET (compatibilidad documentada en 2A: las orgs
+ * CON clave dedicada lo rechazan). Sin ninguna credencial → fail-closed.
+ */
+export function bearerForOrg(organizationId: string): string | null {
+  try {
+    const map = JSON.parse(process.env.AGENTIC_2A_KEYS || '{}') as Record<string, string>
+    const key = map[organizationId]
+    if (typeof key === 'string' && key.length >= 16) return key
+  } catch { /* configuración inválida: cae al secreto compartido */ }
+  return process.env.INTERNAL_API_SECRET || null
+}
+
 export class Http2ALockChecker implements LockChecker {
   baseUrl: string
   timeoutMs: number
@@ -53,9 +70,12 @@ export class Http2ALockChecker implements LockChecker {
         'Accept': 'application/json',
         'X-Org-Id': organizationId,
       }
-      if (process.env.INTERNAL_API_SECRET) {
-        headers['Authorization'] = `Bearer ${process.env.INTERNAL_API_SECRET}`
+      const bearer = bearerForOrg(organizationId)
+      if (!bearer) {
+        // Fail-closed: sin credencial para esta organización no se consulta
+        return { available: false, contractError: true, error: 'TENANT_UNAUTHENTICATED: sin credencial 2A para la organización de la campaña' }
       }
+      headers['Authorization'] = `Bearer ${bearer}`
       const response = await fetch(url, {
         method: 'GET',
         headers,
