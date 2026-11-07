@@ -1,5 +1,10 @@
 /**
  * Tipos y Contratos para Capa 2B (albra-broadcast-2b)
+ *
+ * (tercera reparación 5.A) Toda verificación de seguridad (locks de Capa 2A y
+ * supresiones) es POR ORGANIZACIÓN: los chequeos reciben la organización de la
+ * campaña y los clientes HTTP la propagan como X-Org-Id, validando el eco de
+ * la organización en las respuestas (fail-closed ante respuesta sin/mismatch).
  */
 
 export type CampaignStatus =
@@ -20,11 +25,12 @@ export type CampaignItemStatus =
   | 'DISPATCHING'
   | 'SENT'
   | 'FAILED_RETRYABLE'
-  | 'FAILED'
+  | 'FAILED_FATAL'
   | 'ABORTED_LOCK_ACTIVE'
   | 'SKIPPED_LOCK_UNAVAILABLE'
   | 'SKIPPED_SUPPRESSION_UNAVAILABLE'
   | 'UNCERTAIN_DISPATCH'
+  | 'QUARANTINED_NO_ORG'
 
 export interface Campaign {
   id: string
@@ -45,6 +51,8 @@ export interface Campaign {
 export interface CampaignItem {
   id: string
   campaignId: string
+  /** B4: organización del ítem (NULL/undefined = sin identidad → cuarentena, jamás despacho). */
+  organizationId?: string
   contactPhone: string
   contactName?: string
   variables?: Record<string, string>
@@ -66,21 +74,38 @@ export interface DispatchResult {
 }
 
 export interface Dispatcher {
-  dispatch(to: string, text: string): Promise<DispatchResult>
+/**
+ * B3: organizationId es la identidad de organización del despacho. Los
+ * despachos REALES la exigen (fail-closed en HttpCrmDaemonDispatcher): el
+ * daemon no acepta despachos que no nombran su organización.
+ */
+  dispatch(to: string, text: string, organizationId?: string): Promise<DispatchResult>
 }
 
 export interface LockCheckResult {
   available: boolean
   state?: string
   error?: string
+  /** true cuando el fallo es de CONTRATO/CONTEXT (org ausente/desconocida/desajustada),
+   *  no una denegación legítima de seguridad — auditable de forma distinta. */
+  contractError?: boolean
 }
 
 export interface LockChecker {
-  checkLock(phone: string): Promise<LockCheckResult>
+  /**
+   * (tercera reparación 5.A) La organización es OBLIGATORIA: el lock consultado
+   * es el de (organización, teléfono). Implementaciones standalone pueden
+   * ignorarla, jamás usar una org ajena.
+   */
+  checkLock(phone: string, organizationId: string): Promise<LockCheckResult>
 }
 
 export interface SuppressionChecker {
-  isSuppressed(phone: string, orgId?: string): Promise<boolean>
+  /**
+   * (tercera reparación 5.B) La supresión es POR ORGANIZACIÓN (más la lista
+   * global documentada de requisitos legales). La org es obligatoria.
+   */
+  isSuppressed(phone: string, organizationId: string): Promise<boolean>
 }
 
 export interface FatiguePolicy {

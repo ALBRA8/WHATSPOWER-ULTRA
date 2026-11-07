@@ -258,17 +258,41 @@ export function renderCampaignStudioHtml(): string {
   </main>
 
   <script>
-    // Autenticación del Studio (reparación integral): herramienta del operador; pide el
-    // token (Bearer ADMIN_API_KEYS) una sola vez y lo usa en TODAS las llamadas /api/*.
-    function ultraToken() {
-      let t = localStorage.getItem('ultra_admin_token');
-      if (!t) { t = prompt('Token de acceso (Bearer de ADMIN_API_KEYS):') || ''; if (t) localStorage.setItem('ultra_admin_token', t); }
-      return t;
-    }
-    async function authFetch(url, opts = {}) {
-      const headers = Object.assign({ 'Authorization': 'Bearer ' + ultraToken() }, opts.headers || {});
-      return fetch(url, Object.assign({}, opts, { headers }));
-    }
+  // ============================================================
+  // (segunda reparación §4.A) SESIÓN POR COOKIE HttpOnly — sin secretos en JS:
+  //  - El operador canjea el secreto UNA vez en POST /studio/login.
+  //  - El backend responde Set-Cookie HttpOnly SameSite=Strict (1 h).
+  //  - La cookie es INVISIBLE para JavaScript: un XSS ya no puede leer la
+  //    credencial (antes vivía en el almacenamiento de sesión del navegador y
+  //    era exfiltrable).
+  //  - fetch same-origin envía la cookie automáticamente; sin Bearer en JS.
+  // ============================================================
+  (function () {
+    window.addEventListener('DOMContentLoaded', function () {
+      // ¿Sesión vigente? Si no, pedir canje (el secreto no se almacena nunca).
+      fetch('/api/campaigns', { headers: { 'Content-Type': 'application/json' } }).then(function (r) {
+        if (r.status === 401) {
+          var k = window.prompt('Introduce el secreto administrativo (se canjea por una sesión HttpOnly; jamás se guarda en el navegador):');
+          if (!k) {
+            document.body.innerHTML = '<p style="font-family:system-ui;padding:24px">Se requiere el secreto administrativo para usar el studio.</p>';
+            return;
+          }
+          fetch('/studio/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ secret: k })
+          }).then(function (lr) {
+            if (!lr.ok) {
+              document.body.innerHTML = '<p style="font-family:system-ui;padding:24px">Credencial inválida. Recarga e inténtalo de nuevo.</p>';
+            }
+            // la cookie queda instalada: el valor del secreto se descarta
+          });
+        }
+      });
+    });
+  })();
+  </script>
+  <script>
     let activeCampaignId = null;
     let pollInterval = null;
 
@@ -279,7 +303,7 @@ export function renderCampaignStudioHtml(): string {
       const pain = document.getElementById('neuroPain').value;
 
       try {
-        const res = await authFetch('/api/ai/neuromarketing/generate-spintax', {
+        const res = await fetch('/api/ai/neuromarketing/generate-spintax', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ productName, country, mainBenefit: benefit, painPoint: pain })
@@ -301,7 +325,7 @@ export function renderCampaignStudioHtml(): string {
       for (let i = 1; i <= 5; i++) {
         const seed = 'test_' + Math.random();
         try {
-          const res = await authFetch('/api/spintax/preview', {
+          const res = await fetch('/api/spintax/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ template, name: 'Juan Pérez' })
@@ -320,7 +344,7 @@ export function renderCampaignStudioHtml(): string {
     async function previewCsv() {
       const csv = document.getElementById('cmpCsv').value;
       try {
-        const res = await authFetch('/api/audiences/preview-csv', {
+        const res = await fetch('/api/audiences/preview-csv', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ csvContent: csv })
@@ -338,11 +362,11 @@ export function renderCampaignStudioHtml(): string {
       const csv = document.getElementById('cmpCsv').value;
 
       try {
-        const res = await authFetch('/api/campaigns', {
+        const res = await fetch('/api/campaigns', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            organizationId: 'org_albra_default',
+            // (reparación integral) la organización la fija el server desde la identidad
             name,
             templateSpintax: template,
             csvContent: csv
@@ -367,7 +391,7 @@ export function renderCampaignStudioHtml(): string {
     async function refreshCurrentCampaign() {
       if (!activeCampaignId) return;
       try {
-        const res = await authFetch('/api/campaigns/' + activeCampaignId);
+        const res = await fetch('/api/campaigns/' + activeCampaignId);
         if (!res.ok) return;
         const data = await res.json();
         const cmp = data.campaign;
@@ -386,18 +410,29 @@ export function renderCampaignStudioHtml(): string {
         document.getElementById('cmpProgressText').textContent = pct + '% completado';
         document.getElementById('cmpStatus').textContent = 'Estado: ' + cmp.status;
 
-        // Render table
+        // Render table — (segunda reparación §4.A) RENDERIZADO SEGURO:
+        // los datos de contacto (nombre/teléfono/texto/estado) proceden de CSV
+        // o leads externos y pueden contener payloads XSS. Se construyen nodos
+        // DOM con APIs seguras y textContent — jamás innerHTML con datos.
         const tbody = document.getElementById('logTbody');
         tbody.innerHTML = '';
         items.slice(0, 30).forEach(it => {
           const tr = document.createElement('tr');
           const badgeClass = it.status === 'SENT' ? 'badge-sent' : it.status === 'PENDING' ? 'badge-pending' : it.status.includes('EXCLUDED') || it.status === 'SUPPRESSED' ? 'badge-skipped' : 'badge-failed';
-          tr.innerHTML = \`
-            <td style="font-weight:600;">+\${it.contactPhone}</td>
-            <td>\${it.contactName || '-'}</td>
-            <td style="color:#cbd5e1; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">\${it.renderedText || '-'}</td>
-            <td><span class="badge-status \${badgeClass}">\${it.status}</span></td>
-          \`;
+          const td1 = document.createElement('td');
+          td1.style.fontWeight = '600';
+          td1.textContent = '+' + (it.contactPhone || '');
+          const td2 = document.createElement('td');
+          td2.textContent = it.contactName || '-';
+          const td3 = document.createElement('td');
+          td3.style.cssText = 'color:#cbd5e1; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+          td3.textContent = it.renderedText || '-';
+          const td4 = document.createElement('td');
+          const span = document.createElement('span');
+          span.className = 'badge-status ' + badgeClass;
+          span.textContent = it.status;
+          td4.appendChild(span);
+          tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
           tbody.appendChild(tr);
         });
       } catch(e) {}
@@ -405,19 +440,19 @@ export function renderCampaignStudioHtml(): string {
 
     async function pauseCampaign() {
       if (!activeCampaignId) return;
-      await authFetch('/api/campaigns/' + activeCampaignId + '/pause', { method: 'POST' });
+      await fetch('/api/campaigns/' + activeCampaignId + '/pause', { method: 'POST' });
       refreshCurrentCampaign();
     }
 
     async function resumeCampaign() {
       if (!activeCampaignId) return;
-      await authFetch('/api/campaigns/' + activeCampaignId + '/resume', { method: 'POST' });
+      await fetch('/api/campaigns/' + activeCampaignId + '/resume', { method: 'POST' });
       refreshCurrentCampaign();
     }
 
     async function cancelCampaign() {
       if (!activeCampaignId) return;
-      await authFetch('/api/campaigns/' + activeCampaignId + '/cancel', { method: 'POST' });
+      await fetch('/api/campaigns/' + activeCampaignId + '/cancel', { method: 'POST' });
       refreshCurrentCampaign();
     }
 

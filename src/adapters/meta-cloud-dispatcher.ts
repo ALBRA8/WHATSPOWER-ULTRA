@@ -25,7 +25,7 @@ export class MetaCloudDispatcher implements Dispatcher {
     this.mockMode = config?.mockMode ?? (!this.accessToken || process.env.META_MOCK_MODE === 'true')
   }
 
-  async dispatch(to: string, text: string): Promise<DispatchResult> {
+  async dispatch(to: string, text: string, _organizationId?: string): Promise<DispatchResult> {
     const formattedPhone = to.replace(/\D/g, '')
 
     // Modo simulación (Sala Limpia): NO envía nada real, permitido sin salvaguarda

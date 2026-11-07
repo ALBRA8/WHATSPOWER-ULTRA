@@ -31,8 +31,11 @@ const ORG_Y = 'org_ultra_y'
 const SECRET_X = 'ultra_contract_secret_org_x_min32chars'
 const SECRET_Y = 'ultra_contract_secret_org_y_min32chars'
 
-function signV2(secret: string, body: string, ts: string): string {
-  return createHmac('sha256', secret).update(`${ts}.${body}`, 'utf8').digest('hex')
+// (fusión) canonical v2 del contrato vigente: `${org}.${ts}.${body}` — la
+// organización queda LIGADA a la firma y viaja en X-Org-Id (nunca del body).
+function signV2(secret: string, body: string, ts: string, org = ''): string {
+  const canonical = `${org ? org + '.' : ''}${ts}.${body}`
+  return createHmac('sha256', secret).update(canonical, 'utf8').digest('hex')
 }
 
 async function listenEphemeral(server: any): Promise<string> {
@@ -61,9 +64,12 @@ function leadBody(org: string, eventId: string, campaignId?: string, phone = '57
 }
 
 async function postLead(base: string, secret: string, body: string, opts: { ts?: string; tamper?: string; badSignature?: boolean; eventIdHeader?: boolean } = {}): Promise<{ status: number; data: any }> {
+  // (fusión) la org va en X-Org-Id y queda ligada a la firma; el orgId del body
+  // NO autoriza (contrato de fix/b3 absorbido por la fusión).
+  const org = secret === SECRET_X ? ORG_X : secret === SECRET_Y ? ORG_Y : ORG_X
   const ts = opts.ts || String(Date.now())
-  const sig = opts.badSignature ? 'firma_corrupta_000' : signV2(secret, body, ts)
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Timestamp': opts.tamper || ts, 'X-Signature-SHA256': sig }
+  const sig = opts.badSignature ? 'firma_corrupta_000' : signV2(secret, body, ts, org)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Timestamp': opts.tamper || ts, 'X-Signature-SHA256': sig, 'X-Org-Id': org }
   const res = await fetch(`${base}/api/audiences/webhook-lead`, { method: 'POST', headers, body })
   return { status: res.status, data: await res.json() as any }
 }
@@ -281,12 +287,14 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
     const campaign = await engine.createCampaign({ organizationId: ORG_X, name: 'Retry', templateSpintax: 'Hola', csvContent: 'phone,name\n573000000333,Tres' })
     mockDispatcher.shouldFail = true
     const businessDate = new Date('2026-11-06T13:00:00Z')
-    // Intento 1 → FAILED_RETRYABLE; /step re-encola y reintenta (2) → FAILED_RETRYABLE; (3) → FAILED
+    // Intento 1 → FAILED_RETRYABLE; re-proceso (2) → FAILED_RETRYABLE; (3) → terminal.
+    // (fusión) la nomenclatura de fix/b3 usa FAILED_FATAL como estado terminal
+    // (equivalente al 'FAILED' permanente del contrato v1.1.0).
     await engine.processNextItem(campaign.id, businessDate)
     await engine.processNextItem(campaign.id, businessDate)
     await engine.processNextItem(campaign.id, businessDate)
     const item = engine.getItems(campaign.id)[0]
-    assert.strictEqual(item.status, 'FAILED', 'tras 3 intentos, FAILED permanente')
+    assert.strictEqual(item.status, 'FAILED_FATAL', 'tras 3 intentos, fallo PERMANENTE (FAILED_FATAL)')
     assert.strictEqual(item.retryCount, 3)
 
     // UNCERTAIN_DISPATCH jamás se re-encola automáticamente

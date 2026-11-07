@@ -19,13 +19,14 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     })
 
     // 1. Ingesta de lead exitosa con normalización (+57) y vinculación a campaña
+    // (reparación integral: la org va LIGADA a la verificación, nunca del body)
     const resValid = leadIngester.ingestLead({
       phone: '3019876543', // 10 dígitos -> 573019876543
       name: 'Juan Lead Facebook',
       source: 'facebook_ads',
       campaignId: campaign.id,
       variables: { origen: 'Campaña Black Friday' },
-    }, 'org_test', 'evt_sp3_01')
+    }, 'org_test')
 
     assert.strictEqual(resValid.success, true)
     assert.strictEqual(resValid.canonicalPhone, '573019876543')
@@ -39,8 +40,10 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     assert.strictEqual(dynamicItem?.contactName, 'Juan Lead Facebook')
 
     // 2. Lead con número suprimido es rechazado de inmediato
+    // (tercera reparación 5.B) Supresión POR ORGANIZACIÓN
     db.prepare('INSERT INTO suppression_list (organization_id, phone, reason, created_at) VALUES (?, ?, ?, ?)').run(
-      'org_test', '573009990000',
+      'org_test',
+      '573009990000',
       'opt_out',
       Math.floor(Date.now() / 1000)
     )
@@ -49,7 +52,7 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
       phone: '573009990000',
       name: 'Usuario Dado de Baja',
       source: 'typeform',
-    }, 'org_test', 'evt_sp3_02')
+    })
 
     assert.strictEqual(resSuppressed.success, false)
     assert.strictEqual(resSuppressed.reason, 'PHONE_SUPPRESSED')
@@ -58,7 +61,7 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     const resInvalid = leadIngester.ingestLead({
       phone: '12345',
       source: 'custom_webhook',
-    }, 'org_test', 'evt_sp3_03')
+    })
 
     assert.strictEqual(resInvalid.success, false)
     assert.strictEqual(resInvalid.reason, 'INVALID_PHONE_FORMAT')

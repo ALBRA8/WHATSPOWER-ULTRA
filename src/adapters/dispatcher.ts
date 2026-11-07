@@ -5,7 +5,7 @@ export class MockDispatcher implements Dispatcher {
   shouldFail: boolean = false
   failureReason: string = 'MOCK_DISPATCH_FAILED'
 
-  async dispatch(to: string, text: string): Promise<DispatchResult> {
+  async dispatch(to: string, text: string, _organizationId?: string): Promise<DispatchResult> {
     if (this.shouldFail) {
       return { success: false, error: this.failureReason }
     }
@@ -24,24 +24,27 @@ export class HttpCrmDaemonDispatcher implements Dispatcher {
   constructor(options?: { endpointUrl?: string; secret?: string; allowRealDispatch?: boolean }) {
     this.endpointUrl = options?.endpointUrl || (process.env.WHATSAPP_DAEMON_URL ? `${process.env.WHATSAPP_DAEMON_URL}/send` : 'http://localhost:3002/send')
     this.secret = options?.secret || process.env.INTERNAL_API_SECRET || ''
-    // Gate doble (contrato §5): el flag del constructor Y la variable de entorno
-    // ALLOW_REAL_DISPATCH deben estar ambos en true para permitir envío real.
-    this.allowRealDispatch = (options?.allowRealDispatch ?? false) && process.env.ALLOW_REAL_DISPATCH === 'true'
+    this.allowRealDispatch = options?.allowRealDispatch ?? false
   }
 
-  async dispatch(to: string, text: string): Promise<DispatchResult> {
-    // SALVAGUARDA FÍSICA (contrato §5): sin autorización explícita BLOQUEAR SIEMPRE.
+  async dispatch(to: string, text: string, organizationId?: string): Promise<DispatchResult> {
+    // SALVAGUARDA FÍSICA (orden de cierre 2026-11-06): si no se autoriza explícitamente el
+    // envío real, BLOQUEAR SIEMPRE — la condición anterior por substring ':3002' era
+    // bypasseable cambiando el host/puerto del daemon.
     if (!this.allowRealDispatch) {
       return {
         success: false,
-        error: 'DISPATCH_BLOCKED_BY_SAFETY_GUARD: envío real bloqueado — allowRealDispatch/ALLOW_REAL_DISPATCH no autorizados (fail-closed)',
+        error: 'DISPATCH_BLOCKED_BY_SAFETY_GUARD: envío real bloqueado — allowRealDispatch no está autorizado (fail-closed)',
       }
     }
-    // Config incompleta ⇒ bloqueo (contrato §5: duda/ausencia ⇒ jamás despacho).
-    if (!this.secret || this.secret.length < 16) {
+
+    // B3 — IDENTIDAD DE ORGANIZACIÓN OBLIGATORIA (fail-closed, sin red):
+    // el despacho NOMBRA su organización (P0.1: el daemon jamás acepta "la
+    // sesión global"). Sin organización no se despacha.
+    if (!organizationId || typeof organizationId !== 'string') {
       return {
         success: false,
-        error: 'DISPATCH_BLOCKED_BY_SAFETY_GUARD: credencial del daemon ausente o incompleta (fail-closed)',
+        error: 'TENANT_CONTEXT_INVALID: dispatch exige organizationId de la campaña (el daemon no acepta despachos sin organización)',
       }
     }
 
@@ -51,8 +54,9 @@ export class HttpCrmDaemonDispatcher implements Dispatcher {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.secret}`,
+          'X-Org-Id': organizationId,
         },
-        body: JSON.stringify({ to, text }),
+        body: JSON.stringify({ to, text, orgId: organizationId }),
         signal: AbortSignal.timeout(5000),
       })
 

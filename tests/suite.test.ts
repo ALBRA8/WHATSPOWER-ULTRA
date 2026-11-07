@@ -46,8 +46,8 @@ invalido,Error,Cali
     const mockLock = new MockLockChecker()
     const mockDispatcher = new MockDispatcher()
 
-    // Bloquear contacto en 2A
-    mockLock.setLock('573017543786', 'IN_FLOW_2A')
+    // Bloquear contacto en 2A PARA la organización de la campaña (tercera reparación 5.A)
+    mockLock.setLock('573017543786', 'IN_FLOW_2A', 'org_test_1')
 
     const engine = new BroadcastEngine({
       db,
@@ -103,7 +103,7 @@ invalido,Error,Cali
     assert.strictEqual(item.status, 'PENDING')
 
     // El contacto escribe a WhatsApp antes de que le toque el turno -> adquiere lock en 2A
-    mockLock.setLock('573017543786', 'HANDOFF_HUMAN')
+    mockLock.setLock('573017543786', 'HANDOFF_HUMAN', 'org_test_1')
 
     // El worker intenta procesar el ítem
     const businessDate = new Date('2026-10-24T10:00:00-05:00') // 10:00 AM hora Bogotá
@@ -161,8 +161,8 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
     const suppressionStore = new LocalSuppressionStore(db)
 
-    // Registrar baja previa de contacto (scoped a la organización de la campaña — contrato §9)
-    suppressionStore.addSuppression('573017543786', 'Usuario solicitó BAJA', 'org_test_1')
+    // Registrar baja previa de contacto
+    suppressionStore.addSuppression('org_test_1', '573017543786', 'Usuario solicitó BAJA')
 
     const engine = new BroadcastEngine({
       db,

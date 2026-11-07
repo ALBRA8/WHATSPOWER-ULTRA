@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { canonicalizePhone } from './csv-importer.ts'
-import { EventIdempotencyStore } from '../security.ts'
+import { createHash } from 'node:crypto'
+import { EventIdempotencyStore, LEGACY_LEAD_ORG } from '../security.ts'
 
 export interface RealtimeLeadPayload {
   phone: string
@@ -9,6 +10,8 @@ export interface RealtimeLeadPayload {
   source: 'facebook_ads' | 'tiktok_ads' | 'typeform' | 'custom_webhook'
   campaignId?: string
   variables?: Record<string, string>
+  /** (fusión integral) identificador del evento para idempotencia orgId::eventId */
+  eventId?: string
 }
 
 export interface IngestResult {
@@ -16,28 +19,25 @@ export interface IngestResult {
   leadId?: string
   canonicalPhone?: string
   reason?: string
-  duplicate?: boolean
 }
 
-/**
- * Ingesta de leads en tiempo real (contrato v1.1.0 §1 y §3):
- *  - La organización del lead VIENE DE LA CREDENCIAL (el secreto HMAC que validó la
- *    firma VINCULA la org); jamás se acepta del payload sin verificación.
- *  - JAMÁS un webhook de la org A puede añadir leads a una campaña de la org B:
- *    payload.campaignId se valida contra la organización vinculada (404 sin oráculo).
- *  - Idempotencia PERSISTENTE por (orgId, eventId): un evento repetido (incluso tras
- *    reinicio del proceso) no inserta dos veces (tabla event_idempotency, 7 días).
- */
 export class WebhookLeadIngester {
+  private events: EventIdempotencyStore | null = null
   private db: DatabaseSync
-  private events: EventIdempotencyStore
 
   constructor(db: DatabaseSync) {
     this.db = db
-    this.events = new EventIdempotencyStore(db)
   }
 
-  ingestLead(payload: RealtimeLeadPayload, orgId: string, eventId?: string): IngestResult {
+  /**
+   * Ingesta de lead con binding de organización (reparación integral 2026-11-06):
+   * - organizationId viene de la VERIFICACIÓN HMAC (X-Org-Id autenticado), nunca del body.
+   * - Si el payload referencia una campaña, esa campaña DEBE pertenecer a la organización
+   *   autenticada; en caso contrario se rechaza SIN almacenar (anti inyección cross-org).
+   * - El secreto v1 (org reservada "_legacy") no puede ligar leads a campañas.
+   */
+  ingestLead(payload: RealtimeLeadPayload, organizationId?: string): IngestResult {
+    const org = organizationId ?? LEGACY_LEAD_ORG
     const rawPhone = payload.phone
     const canonical = canonicalizePhone(rawPhone)
 
@@ -45,16 +45,33 @@ export class WebhookLeadIngester {
       return { success: false, reason: 'INVALID_PHONE_FORMAT' }
     }
 
-    // Idempotencia del evento (con efectos externos ⇒ eventId OBLIGATORIO, contrato §3)
-    if (eventId) {
-      const claim = this.events.claim(orgId, eventId)
+    // (fusión integral) Idempotencia PERSISTENTE del evento (orgId::eventId):
+    // un evento repetido — incluso tras reinicio — JAMÁS ejecuta sus efectos dos
+    // veces. Fail-closed: si la reclamación no puede persistirse se trata como
+    // duplicado (una operación con efectos externos no corre dos veces).
+    if (payload.eventId) {
+      if (!this.events) this.events = new EventIdempotencyStore(this.db)
+      const claim = this.events.claim(org, payload.eventId)
       if (claim === 'duplicate') {
-        return { success: true, duplicate: true, reason: 'DUPLICATE_EVENT', canonicalPhone: canonical }
+        return { success: true, duplicate: true, reason: 'DUPLICATE_EVENT', canonicalPhone: canonical } as IngestResult
       }
     }
 
-    // Comprobar supresión scoped por organización
-    const supp = this.db.prepare('SELECT phone FROM suppression_list WHERE organization_id = ? AND phone = ?').get(orgId, canonical)
+    // Binding cross-org: la campaña referenciada debe existir Y pertenecer a la
+    // organización autenticada (segunda reparación §4.D: un webhook jamás
+    // inserta leads huérfanos — campañas inexistentes — ni cross-org).
+    if (payload.campaignId) {
+      const campaign = this.db.prepare('SELECT id, organization_id, status FROM campaigns WHERE id = ?').get(payload.campaignId) as any
+      if (!campaign) {
+        return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_NOT_FOUND' }
+      }
+      if (!org || org === LEGACY_LEAD_ORG || campaign.organization_id !== org) {
+        return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_ORG_MISMATCH' }
+      }
+    }
+
+    // Comprobar supresión
+    const supp = this.db.prepare('SELECT phone FROM suppression_list WHERE phone = ?').get(canonical)
     if (supp) {
       return { success: false, canonicalPhone: canonical, reason: 'PHONE_SUPPRESSED' }
     }
@@ -63,29 +80,27 @@ export class WebhookLeadIngester {
     const now = Math.floor(Date.now() / 1000)
 
     this.db.prepare(`
-      INSERT INTO realtime_leads (id, organization_id, phone, name, source, campaign_id, payload_json, processed, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+      INSERT INTO realtime_leads (id, phone, name, source, campaign_id, payload_json, processed, created_at, organization_id)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(
       leadId,
-      orgId,
       canonical,
       payload.name || null,
       payload.source,
       payload.campaignId || null,
       payload.variables ? JSON.stringify(payload.variables) : null,
-      now
+      now,
+      org === LEGACY_LEAD_ORG ? null : org
     )
 
-    // Si viene asociado a una campaña, debe ser una campaña DE SU ORGANIZACIÓN (contrato §1:
-    // jamás se confía en campaignId sin validar la relación con la organización autenticada).
+    // Si viene asociado a una campaña activa, agregarlo a campaign_items como PENDING
     if (payload.campaignId) {
-      const campaign = this.db.prepare('SELECT id, status, organization_id FROM campaigns WHERE id = ?').get(payload.campaignId) as any
-      if (campaign && campaign.organization_id !== orgId) {
-        return { success: false, canonicalPhone: canonical, reason: 'CAMPAIGN_NOT_IN_ORG' }
-      }
+      const campaign = this.db.prepare('SELECT id, status FROM campaigns WHERE id = ?').get(payload.campaignId) as any
       if (campaign && campaign.status !== 'COMPLETED' && campaign.status !== 'CANCELLED') {
         const itemId = `itm_${randomUUID()}`
-        const idempotencyKey = `${orgId}_${payload.campaignId}_${canonical}`
+        // (reparación integral) MISMA función de clave que el importador CSV:
+        // formatos distintos sobre una columna UNIQUE creaban ítems duplicados.
+        const idempotencyKey = createHash('sha256').update(`${payload.campaignId}_${canonical}`).digest('hex')
         try {
           this.db.prepare(`
             INSERT INTO campaign_items (id, campaign_id, contact_phone, contact_name, variables_json, status, retry_count, idempotency_key)
