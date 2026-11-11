@@ -9,6 +9,7 @@
     "worker": "node --experimental-strip-types src/worker-main.ts",
     "test": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v -E \"pilot-safeguards|bajas-circuit\")",
     "test:e2e": "node --env-file=.env --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts",
-    "tsc": "tsc --noEmit -p tsconfig.json"
+    "tsc": "tsc --noEmit -p tsconfig.json",
+    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts"
   }
 }
