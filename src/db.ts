@@ -15,7 +15,9 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
 
   // (tercera reparación) WAL para concurrencia REAL multi-worker/réplica sobre el
   // mismo archivo (workers concurrentes + recuperación sin bloqueos de escritura).
-  db.exec(`PRAGMA journal_mode=WAL;`)
+  // (reauditoría ciclo 2) busy_timeout: WAL alone no evita SQLITE_BUSY en la
+  // primera colisión de escrituras entre server y worker que comparten db/.
+  db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`)
 
   // Esquema SQLite privado de Capa 2B
   db.exec(`

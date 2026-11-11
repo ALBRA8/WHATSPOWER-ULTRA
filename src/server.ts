@@ -311,9 +311,12 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         return
       }
 
-      // (A4-10) Ítems paginados y SIN columnas pesadas por defecto
-      // (rendered_text/variables_json pueden ser MB por ítem) + total para
-      // paginado del Studio: ?itemsLimit (1..2000, default 500).
+      // (A4-10) Ítems paginados: ?itemsLimit (1..2000, default 500) + total
+      // para el paginado del Studio.
+      // Nota honesta (reauditoría ciclo 2): las columnas pesadas
+      // (rendered_text/variables_json) SIGUEN incluidas en el SELECT — la
+      // paginación acota el daño pero no elimina el coste; proyección de
+      // columnas pendiente si el volumen lo exige.
       const itemsLimit = Math.min(Math.max(parseInt(url.searchParams.get('itemsLimit') || '500', 10) || 500, 1), 2000)
       const items = engine.getItems(campaignId, itemsLimit)
       const total = (db.prepare('SELECT COUNT(*) AS n FROM campaign_items WHERE campaign_id = ?').get(campaignId) as { n: number }).n

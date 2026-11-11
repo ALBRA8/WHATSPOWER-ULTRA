@@ -131,6 +131,7 @@ export class DurableReplayCache {
     this.db = new DatabaseSync(target)
     this.db.exec(`
       PRAGMA journal_mode=WAL;
+      PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS replay_seen (
         fingerprint TEXT PRIMARY KEY,
         expires_at INTEGER NOT NULL
