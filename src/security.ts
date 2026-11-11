@@ -363,8 +363,14 @@ export function productionConfigProblems(env: NodeJS.ProcessEnv = process.env): 
   }
 
   if (env.TRANSPORT_ENGINE === 'meta_cloud') {
-    if (!env.META_ACCESS_TOKEN) problems.push('META_ACCESS_TOKEN: ausente con TRANSPORT_ENGINE=meta_cloud')
-    if (!env.META_PHONE_NUMBER_ID) problems.push('META_PHONE_NUMBER_ID: ausente con TRANSPORT_ENGINE=meta_cloud')
+    // OLEADA 2 (decisión 2026-11-11): las credenciales globales
+    // (META_ACCESS_TOKEN/META_PHONE_NUMBER_ID) YA NO son una vía de envío —
+    // cada organización despacha con SUS credenciales. El arranque exige el
+    // registro por organización (env standalone o credenciales de servicio
+    // hacia CRM); sin él ninguna organización podría despachar (fail-closed).
+    if (!env.META_ORG_CREDENTIALS && !env.CRM_INTERNAL_CREDENTIALS) {
+      problems.push('META_ORG_CREDENTIALS o CRM_INTERNAL_CREDENTIALS: ausentes con TRANSPORT_ENGINE=meta_cloud — sin credenciales POR ORGANIZACIÓN ninguna campaña puede despachar (la credencial global META_ACCESS_TOKEN ya no es una vía de envío)')
+    }
     if (env.ALLOW_REAL_DISPATCH !== 'true') {
       problems.push('ALLOW_REAL_DISPATCH: no está en true — los envíos de Meta Cloud quedarán BLOQUEADOS (fail-closed); actívala solo con autorización expresa')
     }

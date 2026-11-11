@@ -531,19 +531,56 @@ describe('TR: salvaguardas de despacho real en TODOS los adaptadores', () => {
     }
   })
 
-  it('TR-02: MetaCloudDispatcher con ALLOW_REAL_DISPATCH=true SÍ intenta el envío', async () => {
+  it('TR-02: MetaCloudDispatcher con ALLOW_REAL_DISPATCH=true SÍ despacha con las credenciales DE LA ORGANIZACIÓN', async () => {
     process.env.ALLOW_REAL_DISPATCH = 'true'
     let fetchCalled = 0
+    let sentAuth = ''
+    let sentPhoneId = ''
     const origFetch = globalThis.fetch
-    globalThis.fetch = (async () => { fetchCalled++; return new Response(JSON.stringify({ messages: [{ id: 'wamid_test' }] }), { status: 200 }) }) as any
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalled++
+      sentAuth = (init?.headers as Record<string, string>)['Authorization']
+      sentPhoneId = String(input).match(/graph\.facebook\.com\/v[\d.]+\/(\d+)\/messages/)![1]
+      return new Response(JSON.stringify({ messages: [{ id: 'wamid_test' }] }), { status: 200 })
+    }) as any
+    const { OrgWaCredentialRegistry, EnvOrgWaSource } = await import('../src/org-wa-credentials.ts')
+    const registry = new OrgWaCredentialRegistry([new EnvOrgWaSource({
+      metaOrgNumbers: 'org-a:111000111',
+      metaOrgCredentials: 'org-a:111000111:token-ORG-A-0123456789abcdef',
+    })])
     try {
-      const d = new MetaCloudDispatcher({ accessToken: 'EAAG_token_ficticio_para_test_000000', mockMode: false })
-      const r = await d.dispatch('573001112233', 'hola')
+      const d = new MetaCloudDispatcher({ registry, mockMode: false })
+      const r = await d.dispatch('573001112233', 'hola', 'org-a')
       assert.strictEqual(r.success, true)
       assert.strictEqual(fetchCalled, 1)
+      // el token usado es el DE LA ORGANIZACIÓN (no una credencial global)
+      assert.strictEqual(sentAuth, 'Bearer token-ORG-A-0123456789abcdef')
+      assert.strictEqual(sentPhoneId, '111000111')
     } finally {
       globalThis.fetch = origFetch
       delete process.env.ALLOW_REAL_DISPATCH
+    }
+  })
+
+  it('TR-01b: la credencial global META_ACCESS_TOKEN YA NO despacha — org sin conexión propia → REJECTED (decisión #2)', async () => {
+    const prev = process.env.ALLOW_REAL_DISPATCH
+    process.env.ALLOW_REAL_DISPATCH = 'true'
+    process.env.META_ACCESS_TOKEN = 'EAAG_token_global_ignorado_0123456789'
+    let fetchCalled = 0
+    const origFetch = globalThis.fetch
+    globalThis.fetch = (async () => { fetchCalled++; throw new Error('fetch NO debió llamarse') }) as any
+    const { OrgWaCredentialRegistry, EnvOrgWaSource } = await import('../src/org-wa-credentials.ts')
+    try {
+      // registro VACÍO: org-a no tiene conexión propia declarada
+      const d = new MetaCloudDispatcher({ registry: new OrgWaCredentialRegistry([new EnvOrgWaSource({ metaOrgNumbers: '', metaOrgCredentials: '' })]), mockMode: false })
+      const r = await d.dispatch('573001112233', 'hola', 'org-a')
+      assert.strictEqual(r.success, false)
+      assert.ok(r.error!.includes('NO_CONNECTED_NUMBER'))
+      assert.strictEqual(fetchCalled, 0, 'el token global NO debe producir ningún envío')
+    } finally {
+      globalThis.fetch = origFetch
+      if (prev !== undefined) process.env.ALLOW_REAL_DISPATCH = prev
+      delete process.env.META_ACCESS_TOKEN
     }
   })
 
@@ -591,7 +628,7 @@ describe('ENV: guard fail-fast de producción ULTRA', () => {
     } finally { cleanEnv() }
   })
 
-  it('ENV-02: meta_cloud sin token ni ALLOW_REAL_DISPATCH → nombra las 3 carencias', () => {
+  it('ENV-02: meta_cloud sin credenciales por organización ni ALLOW_REAL_DISPATCH → nombra las carencias', () => {
     cleanEnv()
     process.env.NODE_ENV = 'production'
     process.env.ADMIN_API_KEYS = 'x'.repeat(24)
@@ -600,9 +637,23 @@ describe('ENV: guard fail-fast de producción ULTRA', () => {
     process.env.TRANSPORT_ENGINE = 'meta_cloud'
     try {
       const problems = productionConfigProblems()
-      assert.ok(problems.some((p) => p.includes('META_ACCESS_TOKEN')))
-      assert.ok(problems.some((p) => p.includes('META_PHONE_NUMBER_ID')))
+      assert.ok(problems.some((p) => p.includes('META_ORG_CREDENTIALS')))
       assert.ok(problems.some((p) => p.includes('ALLOW_REAL_DISPATCH')))
+    } finally { cleanEnv() }
+  })
+
+  it('ENV-02b: META_ACCESS_TOKEN global NO sustituye a las credenciales por organización (decisión #2)', () => {
+    cleanEnv()
+    process.env.NODE_ENV = 'production'
+    process.env.ADMIN_API_KEYS = 'x'.repeat(24)
+    process.env.WEBHOOK_LEAD_SECRET = 'y'.repeat(24)
+    process.env.INTERNAL_API_SECRET = 'z'.repeat(24)
+    process.env.TRANSPORT_ENGINE = 'meta_cloud'
+    process.env.META_ACCESS_TOKEN = 'g'.repeat(32)
+    process.env.META_PHONE_NUMBER_ID = '111000111'
+    try {
+      const problems = productionConfigProblems()
+      assert.ok(problems.some((p) => p.includes('META_ORG_CREDENTIALS')), 'el guard exige credenciales POR ORGANIZACIÓN aunque exista un token global')
     } finally { cleanEnv() }
   })
 })
