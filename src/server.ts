@@ -3,13 +3,27 @@ import { randomUUID } from 'node:crypto'
 import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
-import { issueStudioSession, resolveStudioSession, RateLimiter } from './security.ts'
+import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual } from './security.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
 import { renderCampaignStudioHtml } from './studio/campaign-studio-html.ts'
 import { renderSpintax } from './engine/spintax.ts'
 import { parseAudienceCsv } from './audiences/csv-importer.ts'
+
+// ============================================================
+// (A5-08, auditoría 2026-11-11) Umbrales de proceso: una rejection/excepción
+// no capturada NUNCA muere en silencio ni arrastra el proceso sin rastro:
+// se loguea con detalle y el proceso termina limpio (systemd/docker con
+// restart: unless-stopped lo reinicia; el arranque ya ejecuta recoverFromCrash).
+// ============================================================
+process.on('unhandledRejection', (reason) => {
+  console.error('[ultra-server] unhandledRejection:', reason instanceof Error ? reason.message : reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[ultra-server] uncaughtException (parada de emergencia):', err.message)
+  process.exit(1)
+})
 import { WebhookLeadIngester } from './audiences/webhook-ingest.ts'
 import { MetaCloudDispatcher } from './adapters/meta-cloud-dispatcher.ts'
 import { NeuromarketingEngine } from './ai/neuromarketing-engine.ts'
@@ -149,8 +163,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       }
       let secret = ''
       try { secret = String(JSON.parse(rb.body).secret || '') } catch {}
-      const idx = adminKeys.findIndex((k) => k.key === secret)
-      if (idx === -1) {
+      // (A2-04) Comparación EN TIEMPO CONSTANTE (política del propio repo):
+      // se recorren TODAS las claves con safeEqual y se agrega el índice
+      // coincidente; nunca se corta al primer acierto.
+      let matchIdx = -1
+      for (let i = 0; i < adminKeys.length; i++) {
+        if (safeEqual(adminKeys[i].key, secret)) matchIdx = i
+      }
+      if (matchIdx === -1) {
         console.warn(`[Seguridad 2B ALERTA] Studio login fallido (IP: ${req.socket.remoteAddress})`)
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Credencial administrativa inválida' }))
@@ -159,7 +179,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       studioLoginAttempts.delete(ip)
       res.writeHead(200, {
         'Content-Type': 'application/json',
-        'Set-Cookie': issueStudioSession(idx, adminKeys[idx].key),
+        'Set-Cookie': issueStudioSession(matchIdx, adminKeys[matchIdx].key),
       })
       res.end(JSON.stringify({ ok: true, sessionTtlSeconds: 3600 }))
       return
@@ -231,12 +251,19 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     }
 
     // 4. Listar Campañas (filtrado por organización de la identidad — sin enumeración cross-org)
+    // (A4-10) Paginación obligatoria: ?limit (1..500, default 100) & ?offset.
     if (req.method === 'GET' && url.pathname === '/api/campaigns') {
+      const q = url.searchParams
+      const limit = Math.min(Math.max(parseInt(q.get('limit') || '100', 10) || 100, 1), 500)
+      const offset = Math.max(parseInt(q.get('offset') || '0', 10) || 0, 0)
+      const listSql = identity!.org === null
+        ? 'SELECT * FROM campaigns ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        : 'SELECT * FROM campaigns WHERE organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
       const rows = (identity!.org === null
-        ? db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all()
-        : db.prepare('SELECT * FROM campaigns WHERE organization_id = ? ORDER BY created_at DESC').all(identity!.org)) as any[]
+        ? db.prepare(listSql).all(limit, offset)
+        : db.prepare(listSql).all(identity!.org, limit, offset)) as any[]
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify(rows))
+      res.end(JSON.stringify({ campaigns: rows, limit, offset }))
       return
     }
 
@@ -264,7 +291,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           return
         }
         const campaign = await engine.createCampaign(data)
-        res.writeHead(200, { 'Content-Type': 'application/json' })
+        // (A4-15) 201 Created: la creación SÍ creó un recurso nuevo.
+        res.writeHead(201, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(campaign))
       } catch (e: any) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
@@ -283,9 +311,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         return
       }
 
-      const items = engine.getItems(campaignId)
+      // (A4-10) Ítems paginados y SIN columnas pesadas por defecto
+      // (rendered_text/variables_json pueden ser MB por ítem) + total para
+      // paginado del Studio: ?itemsLimit (1..2000, default 500).
+      const itemsLimit = Math.min(Math.max(parseInt(url.searchParams.get('itemsLimit') || '500', 10) || 500, 1), 2000)
+      const items = engine.getItems(campaignId, itemsLimit)
+      const total = (db.prepare('SELECT COUNT(*) AS n FROM campaign_items WHERE campaign_id = ?').get(campaignId) as { n: number }).n
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ campaign, items }))
+      res.end(JSON.stringify({ campaign, items, itemsTotal: total, itemsLimit }))
       return
     }
 

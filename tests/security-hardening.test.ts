@@ -126,7 +126,7 @@ describe('ORG: organizationId desde identidad, jamás del body', () => {
     try {
       const { status } = await createCampaign(base, KEY_B, 'Robo de org', { organizationId: 'org_aaa' })
       assert.strictEqual(status, 400)
-      const list = await (await authFetch(base, '/api/campaigns', KEY_B)).json() as any[]
+      const list = (await (await authFetch(base, '/api/campaigns', KEY_B)).json() as any).campaigns as any[]
       assert.strictEqual(list.length, 0, 'no debe existir la campaña')
     } finally { server.close() }
   })
@@ -136,7 +136,8 @@ describe('ORG: organizationId desde identidad, jamás del body', () => {
     const base = await listenEphemeral(server)
     try {
       const { status, data } = await createCampaign(base, KEY_A, 'De org A')
-      assert.strictEqual(status, 200)
+      // (A4-15) creación → 201 Created
+      assert.strictEqual(status, 201)
       assert.strictEqual(data.organizationId, 'org_aaa')
     } finally { server.close() }
   })
@@ -148,7 +149,8 @@ describe('ORG: organizationId desde identidad, jamás del body', () => {
       const { status } = await createCampaign(base, KEY_SVC, 'Servicio sin org')
       assert.strictEqual(status, 400)
       const ok = await createCampaign(base, KEY_SVC, 'Servicio con org', { organizationId: 'org_aaa' })
-      assert.strictEqual(ok.status, 200)
+      // (A4-15) creación → 201 Created
+      assert.strictEqual(ok.status, 201)
       assert.strictEqual(ok.data.organizationId, 'org_aaa')
     } finally { server.close() }
   })
@@ -161,8 +163,8 @@ describe('ENUM/OWN: sin enumeración cross-org, ownership en cada operación', (
     try {
       await createCampaign(base, KEY_A, 'Solo A')
       await createCampaign(base, KEY_B, 'Solo B')
-      const listA = await (await authFetch(base, '/api/campaigns', KEY_A)).json() as any[]
-      const listB = await (await authFetch(base, '/api/campaigns', KEY_B)).json() as any[]
+      const listA = ((await (await authFetch(base, '/api/campaigns', KEY_A)).json() as any).campaigns) as any[]
+      const listB = ((await (await authFetch(base, '/api/campaigns', KEY_B)).json() as any).campaigns) as any[]
       assert.strictEqual(listA.length, 1)
       assert.strictEqual(listA[0].organization_id, 'org_aaa')
       assert.strictEqual(listB.length, 1)
@@ -520,7 +522,10 @@ describe('TR: salvaguardas de despacho real en TODOS los adaptadores', () => {
     const origFetch = globalThis.fetch
     globalThis.fetch = (async () => { fetchCalled++; throw new Error('fetch NO debió llamarse') }) as any
     try {
-      const d = new MetaCloudDispatcher({ accessToken: 'EAAG_token_ficticio_para_test_000000', mockMode: false })
+      // (A5-02) La credencial global ya no existe en MetaCloudConfig (Oleada 2
+      // por-org): el guard ALLOW_REAL_DISPATCH bloquea ANTES de cualquier
+      // resolución de credenciales, así que basta mockMode:false.
+      const d = new MetaCloudDispatcher({ mockMode: false })
       const r = await d.dispatch('573001112233', 'hola')
       assert.strictEqual(r.success, false)
       assert.ok(r.error!.includes('DISPATCH_BLOCKED_BY_SAFETY_GUARD'))
