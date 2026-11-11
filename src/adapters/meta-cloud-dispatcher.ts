@@ -34,6 +34,16 @@ export interface MetaCloudConfig {
  *  - NINGÚN envío real sin ALLOW_REAL_DISPATCH=true (salvaguarda dura,
  *    independiente de la configuración — orden de cierre 2026-11-06).
  */
+// Códigos HTTP de Graph con fallo CONFIRMADO (el mensaje NO fue aceptado).
+// Espejo de WHATSPOWER meta-cloud-org-transport.ts: cualquier otro error
+// HTTP (408/425/5xx) y todo fallo de red/timeout son RESULTADO INCIERTO:
+// el mensaje pudo haberse aceptado y NO debe reenviarse a ciegas
+// (contrato §7, clasificación B2 — auditoría A1-01 2026-11-11).
+const REJECTABLE_STATUS = new Set([400, 401, 403, 404, 410, 413, 422, 429])
+
+/** Tope del registro en memoria (ring buffer) — fuga de memoria (A1-02). */
+const DISPATCH_LOG_CAP = 500
+
 export class MetaCloudDispatcher implements Dispatcher {
   registry: OrgWaCredentialRegistry
   apiVersion: string
@@ -137,9 +147,19 @@ export class MetaCloudDispatcher implements Dispatcher {
 
       if (!response.ok) {
         const errText = await response.text()
+        if (REJECTABLE_STATUS.has(response.status)) {
+          // Rechazo CONFIRMADO por Graph: el mensaje no fue aceptado.
+          return {
+            success: false,
+            error: `META_CLOUD_API_HTTP_${response.status}: ${errText}`,
+          }
+        }
+        // 408/425/5xx y demás → RESULTADO INCIERTO (A1-01): Graph pudo haber
+        // aceptado el mensaje y fallar al responder; jamás reenviar a ciegas.
         return {
           success: false,
-          error: `META_CLOUD_API_HTTP_${response.status}: ${errText}`,
+          uncertain: true,
+          error: `META_CLOUD_API_HTTP_${response.status} (resultado ambiguo: el mensaje pudo haberse aceptado): ${errText}`,
         }
       }
 
@@ -147,14 +167,20 @@ export class MetaCloudDispatcher implements Dispatcher {
       const messageId = data.messages?.[0]?.id || `meta_msg_${Date.now()}`
 
       this.dispatchedMessages.push({ to: formattedPhone, text, messageId, timestamp: Date.now(), organizationId: credential.organizationId, phoneNumberId: credential.phoneNumberId })
+      if (this.dispatchedMessages.length > DISPATCH_LOG_CAP) {
+        this.dispatchedMessages.splice(0, this.dispatchedMessages.length - DISPATCH_LOG_CAP)
+      }
       return {
         success: true,
         messageId,
       }
     } catch (err: unknown) {
+      // Timeout / conexión cortada → RESULTADO INCIERTO (A1-01): el mensaje
+      // pudo haber sido aceptado por Graph; reenviar a ciegas duplicaría.
       const message = err instanceof Error ? err.message : String(err)
       return {
         success: false,
+        uncertain: true,
         error: `META_CLOUD_NETWORK_ERROR: ${message}`,
       }
     }

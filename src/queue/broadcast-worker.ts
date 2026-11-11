@@ -55,50 +55,46 @@ export class BroadcastEngine {
     const now = Math.floor(Date.now() / 1000)
 
     const importResult = parseAudienceCsv(opts.csvContent)
-
-    this.db.prepare(`
-      INSERT INTO campaigns (id, organization_id, name, template_spintax, status, total_targets, created_at)
-      VALUES (?, ?, ?, ?, 'DRAFT', ?, ?)
-    `).run(campaignId, opts.organizationId, opts.name, opts.templateSpintax, importResult.contacts.length, now)
-
-    let skippedCount = 0
     const orgId = opts.organizationId
+
+    // ============================================================
+    // (A4-11, auditoría 2026-11-11) Dos fases:
+    //  - FASE 1 (solo HTTP/lectura): clasificación de cada contacto
+    //    (supresión / fatiga / lock) SIN escribir nada — un fallo de red
+    //    aquí NO deja campañas a medias;
+    //  - FASE 2 (transacción única): INSERT de campaña + TODOS los ítems +
+    //    skipped_count en una sola transacción SQLite — un crash a mitad
+    //    deja o todo o nada (antes: campaña con total_targets ≠ ítems reales).
+    // ============================================================
+    type Classified = { item: Parameters<BroadcastEngine['saveItem']>[0] }
+    const classified: Classified[] = []
+    let skippedCount = 0
 
     for (const contact of importResult.contacts) {
       const phone = contact.phone
       const itemId = `itm_${randomUUID()}`
       const idempotencyKey = createHash('sha256').update(`${campaignId}_${phone}`).digest('hex')
 
+      const baseItem = {
+        id: itemId,
+        campaignId,
+        organizationId: orgId,
+        contactPhone: phone,
+        contactName: contact.name,
+        variables: contact.variables,
+        idempotencyKey,
+      }
+
       // 1. Pre-filtrado de Supresión (Bajas) — POR ORGANIZACIÓN (tercera reparación 5.B)
       if (await this.suppressionStore.isSuppressed(phone, orgId)) {
-        this.saveItem({
-          id: itemId,
-          campaignId,
-          organizationId: orgId,
-          contactPhone: phone,
-          contactName: contact.name,
-          variables: contact.variables,
-          status: 'SUPPRESSED',
-          errorReason: 'Opt-out / Lista de baja activa',
-          idempotencyKey,
-        })
+        classified.push({ item: { ...baseItem, status: 'SUPPRESSED', errorReason: 'Opt-out / Lista de baja activa' } })
         skippedCount++
         continue
       }
 
       // 2. Pre-filtrado de Fatiga (Máximo 1 broadcast cada 7 días) — por organización
       if (this.fatigueManager.isFatigued(phone, orgId)) {
-        this.saveItem({
-          id: itemId,
-          campaignId,
-          organizationId: orgId,
-          contactPhone: phone,
-          contactName: contact.name,
-          variables: contact.variables,
-          status: 'FATIGUE_EXCLUDED',
-          errorReason: 'Regla de fatiga: ya recibió difusión en los últimos 7 días',
-          idempotencyKey,
-        })
+        classified.push({ item: { ...baseItem, status: 'FATIGUE_EXCLUDED', errorReason: 'Regla de fatiga: ya recibió difusión en los últimos 7 días' } })
         skippedCount++
         continue
       }
@@ -106,35 +102,33 @@ export class BroadcastEngine {
       // 3. Pre-filtrado de Locks de Conversación en Capa 2A (Fase 1) — de ESTA org
       const lockRes = await this.lockChecker.checkLock(phone, orgId)
       if (!lockRes.available) {
-        this.saveItem({
-          id: itemId,
-          campaignId,
-          organizationId: orgId,
-          contactPhone: phone,
-          contactName: contact.name,
-          variables: contact.variables,
-          status: 'LOCK_EXCLUDED',
-          errorReason: lockRes.state ? `Lock activo en 2A (${lockRes.state})` : (lockRes.error || 'Lock no disponible'),
-          idempotencyKey,
-        })
+        classified.push({ item: { ...baseItem, status: 'LOCK_EXCLUDED', errorReason: lockRes.state ? `Lock activo en 2A (${lockRes.state})` : (lockRes.error || 'Lock no disponible') } })
         skippedCount++
         continue
       }
 
       // 4. Contacto libre: se encola como PENDING (SIEMPRE con su organización — B4)
-      this.saveItem({
-        id: itemId,
-        campaignId,
-        organizationId: orgId,
-        contactPhone: phone,
-        contactName: contact.name,
-        variables: contact.variables,
-        status: 'PENDING',
-        idempotencyKey,
-      })
+      classified.push({ item: { ...baseItem, status: 'PENDING' } })
     }
 
-    this.db.prepare('UPDATE campaigns SET skipped_count = ? WHERE id = ?').run(skippedCount, campaignId)
+    // FASE 2 — transacción única (atómica).
+    this.db.exec('BEGIN')
+    try {
+      this.db.prepare(`
+        INSERT INTO campaigns (id, organization_id, name, template_spintax, status, total_targets, created_at)
+        VALUES (?, ?, ?, ?, 'DRAFT', ?, ?)
+      `).run(campaignId, opts.organizationId, opts.name, opts.templateSpintax, importResult.contacts.length, now)
+
+      for (const { item } of classified) {
+        this.saveItem(item)
+      }
+
+      this.db.prepare('UPDATE campaigns SET skipped_count = ? WHERE id = ?').run(skippedCount, campaignId)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      try { this.db.exec('ROLLBACK') } catch { /* rollback de cierre */ }
+      throw err
+    }
 
     return this.getCampaign(campaignId)!
   }
@@ -187,8 +181,12 @@ export class BroadcastEngine {
     }
   }
 
-  getItems(campaignId: string): CampaignItem[] {
-    const rows = this.db.prepare('SELECT * FROM campaign_items WHERE campaign_id = ? ORDER BY rowid ASC').all(campaignId) as any[]
+  /** (A4-10) limit opcional: el detalle HTTP pagina los ítems (default 500
+   *  en el endpoint); sin limit conserva el comportamiento completo interno. */
+  getItems(campaignId: string, limit?: number): CampaignItem[] {
+    const rows = (typeof limit === 'number' && limit > 0
+      ? this.db.prepare('SELECT * FROM campaign_items WHERE campaign_id = ? ORDER BY rowid ASC LIMIT ?').all(campaignId, limit)
+      : this.db.prepare('SELECT * FROM campaign_items WHERE campaign_id = ? ORDER BY rowid ASC').all(campaignId)) as any[]
     return rows.map((r) => ({
       id: r.id,
       campaignId: r.campaign_id,

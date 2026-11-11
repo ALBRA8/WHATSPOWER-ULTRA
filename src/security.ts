@@ -54,7 +54,16 @@ export interface AdminIdentity {
   org: string | null
 }
 
-/** Parsea ADMIN_API_KEYS="k1:orgA,k2,k3:orgC" → identidades. Ignora entradas vacías. */
+/** Parsea ADMIN_API_KEYS → identidades. Ignora entradas vacías.
+ *
+ * (A1-07, auditoría 2026-11-11) Acepta DOS formatos, distinguiéndolos por la
+ * longitud del secreto (≥16):
+ *  - Contrato §3: 'orgId:secreto' → { key: secreto, org: orgId } (formato
+ *    canónico que ya usan CRM internal-org-auth.ts y WP org-auth.ts);
+ *  - Legado: 'secreto:org' → { key: secreto, org: org }.
+ * El filtro de longitud≥16 se aplica al SECRETO, no al orgId (antes, una
+ * entrada en formato contrato quedaba descartada por completo).
+ */
 export function parseAdminKeys(spec: string | undefined): AdminIdentity[] {
   if (!spec) return []
   return spec
@@ -64,7 +73,10 @@ export function parseAdminKeys(spec: string | undefined): AdminIdentity[] {
     .map((entry) => {
       const idx = entry.indexOf(':')
       if (idx === -1) return { key: entry, org: null }
-      return { key: entry.slice(0, idx), org: entry.slice(idx + 1) }
+      const first = entry.slice(0, idx)
+      const second = entry.slice(idx + 1)
+      if (second.length >= 16) return { key: second, org: first }
+      return { key: first, org: second }
     })
     .filter((i) => i.key.length >= 16)
 }
