@@ -1,7 +1,9 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { createBroadcastDatabase } from './db.ts'
+import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
+import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
+import { issueStudioSession, resolveStudioSession, RateLimiter } from './security.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
@@ -16,9 +18,13 @@ import {
   resolveIdentity,
   checkWebhookSecurity,
   readBody,
-  ReplayCache,
+  DurableReplayCache,
+  parseLeadSecretSpec,
+  resolveLeadSecrets,
+  LEGACY_LEAD_ORG,
   productionConfigProblems,
   type AdminIdentity,
+  type LeadSecretSpec,
 } from './security.ts'
 
 // Carga el .env del repo si existe (mismo patrón que Capa 2A; sin él el guard de
@@ -34,6 +40,8 @@ export function createBroadcastServer(options?: {
   suppressionStore?: any
   whatsPowerEnabled?: boolean
   useMetaCloudApi?: boolean
+  /** Ruta del anti-replay durable; ':memory:' para tests. Default: env REPLAY_DB_PATH o <repo>/db/replay-cache.db */
+  replayDbPath?: string
 }) {
   const whatsPowerEnabled = options?.whatsPowerEnabled ?? (process.env.WHATSPOWER_ENABLED !== 'false')
   const db = createBroadcastDatabase(options?.dbPath)
@@ -43,7 +51,8 @@ export function createBroadcastServer(options?: {
     options?.dispatcher ||
     (options?.useMetaCloudApi || process.env.TRANSPORT_ENGINE === 'meta_cloud'
       ? new MetaCloudDispatcher()
-      : new HttpCrmDaemonDispatcher({ allowRealDispatch: false }))
+      // (reparación integral) paridad de salvaguarda: el env explícito habilita el daemon
+      : new HttpCrmDaemonDispatcher({ allowRealDispatch: process.env.ALLOW_REAL_DISPATCH === 'true' }))
   const lockChecker = options?.lockChecker || (whatsPowerEnabled ? new Http2ALockChecker({ enabled: true }) : new StandaloneLockChecker())
   const suppressionStore =
     options?.suppressionStore ||
@@ -66,7 +75,14 @@ export function createBroadcastServer(options?: {
 
   // Identidades administrativas (orden de cierre 2026-11-06)
   const adminKeys: AdminIdentity[] = parseAdminKeys(process.env.ADMIN_API_KEYS)
-  const leadReplay = new ReplayCache()
+  // Anti-replay DURABLE (reparación integral 2026-11-06): sobrevive reinicios;
+  // en tests con dbPath ':memory:' se usa ':memory:' para no compartir estado.
+  const leadReplay = new DurableReplayCache(
+    options?.replayDbPath ?? (options?.dbPath === ':memory:' ? ':memory:' : undefined)
+  )
+  const leadRate = new RateLimiter() // (fusión integral §7): ingesta de leads 30/min por IP
+  // Secretos de ingesta de leads por organización (contrato v2) + fallback v1.
+  const leadSecretSpec: LeadSecretSpec = parseLeadSecretSpec(process.env)
 
   /** 404 sin oráculo: la campaña debe existir Y pertenecer a la organización del llamador. */
   function ownCampaign(campaignId: string, identity: AdminIdentity) {
@@ -76,7 +92,9 @@ export function createBroadcastServer(options?: {
     return campaign
   }
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const studioLoginAttempts = new Map<string, { count: number; resetAt: number }>()
+
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
 
     // ==============================================================
@@ -94,12 +112,57 @@ export function createBroadcastServer(options?: {
         return
       }
       identity = resolveIdentity(req.headers['authorization'], adminKeys)
+        ?? resolveStudioSession(req.headers.cookie as string | undefined, adminKeys)
       if (!identity) {
         console.warn(`[Seguridad 2B ALERTA] Acceso administrativo no autorizado: ${req.method} ${url.pathname} (IP: ${req.socket.remoteAddress})`)
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Unauthorized: credencial administrativa ausente o inválida' }))
         return
       }
+      if (identity.org === null) {
+        // (fusión integral §1) Identidad de servicio con privilegios globales:
+        // acción SIEMPRE auditada con actor truncado (jamás la clave completa).
+        writeAudit(db, identity.key, null, `${req.method} ${url.pathname}`, 'service-identity')
+      }
+    }
+
+    // -1. (segunda reparación §4.A) Canje de sesión del Studio: el operador
+    // envía el secreto UNA vez; el backend responde con cookie HttpOnly de
+    // corta vida. El secreto de larga vida JAMÁS vuelve al navegador (antes
+    // vivía en sessionStorage: un XSS lo leía).
+    if (req.method === 'POST' && url.pathname === '/studio/login') {
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      // Throttle mínimo en memoria (10 intentos/min por IP): anti fuerza bruta
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local'
+      const nowMs = Date.now()
+      const bucket = studioLoginAttempts.get(ip)
+      if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
+      else if (++bucket.count > 10) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Demasiados intentos. Inténtalo más tarde.' }))
+        return
+      }
+      let secret = ''
+      try { secret = String(JSON.parse(rb.body).secret || '') } catch {}
+      const idx = adminKeys.findIndex((k) => k.key === secret)
+      if (idx === -1) {
+        console.warn(`[Seguridad 2B ALERTA] Studio login fallido (IP: ${req.socket.remoteAddress})`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Credencial administrativa inválida' }))
+        return
+      }
+      studioLoginAttempts.delete(ip)
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': issueStudioSession(idx, adminKeys[idx].key),
+      })
+      res.end(JSON.stringify({ ok: true, sessionTtlSeconds: 3600 }))
+      return
     }
 
     // 0. Campaign Studio UI
@@ -118,11 +181,16 @@ export function createBroadcastServer(options?: {
 
     // 2. Previsualizador Spintax
     if (req.method === 'POST' && url.pathname === '/api/spintax/preview') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const { template, name, variables } = JSON.parse(body)
+          const { template, name, variables } = JSON.parse(rb.body)
           const rendered = renderSpintax(template || '', {
             seed: String(Math.random()),
             // Alias name/nombre: el Studio usa {{nombre}} y el CSV usa {{name}};
@@ -135,17 +203,22 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
     // 3. Previsualizador y Validador CSV
     if (req.method === 'POST' && url.pathname === '/api/audiences/preview-csv') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const { csvContent } = JSON.parse(body)
+          const { csvContent } = JSON.parse(rb.body)
           const result = parseAudienceCsv(csvContent || '')
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -153,7 +226,7 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
@@ -237,9 +310,17 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
         return
       }
-      db.prepare("UPDATE campaigns SET status = 'PAUSED' WHERE id = ?").run(campaignId)
+      // (segunda reparación §4.B) Transición CONDICIONAL y ATÓMICA: terminal
+      // (CANCELLED/COMPLETED) jamás se pausa; carrera → 409 con estado real.
+      const tr = transitionCampaignStatus(db, campaignId, identity!.org, 'PAUSED')
+      if (!tr.ok) {
+        const status = tr.code === 'NOT_FOUND' ? 404 : 409
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: tr.message, code: tr.code, currentStatus: tr.from }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, status: 'PAUSED' }))
+      res.end(JSON.stringify({ ok: true, status: 'PAUSED', previousStatus: tr.from }))
       return
     }
 
@@ -250,9 +331,17 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
         return
       }
-      db.prepare("UPDATE campaigns SET status = 'RUNNING' WHERE id = ?").run(campaignId)
+      // (segunda reparación §4.B) CANCELLED es TERMINAL: una campaña cancelada
+      // NO puede reanudarse (antes este UPDATE ciego lo permitía).
+      const tr = transitionCampaignStatus(db, campaignId, identity!.org, 'RUNNING')
+      if (!tr.ok) {
+        const status = tr.code === 'NOT_FOUND' ? 404 : 409
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: tr.message, code: tr.code, currentStatus: tr.from }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, status: 'RUNNING' }))
+      res.end(JSON.stringify({ ok: true, status: 'RUNNING', previousStatus: tr.from }))
       return
     }
 
@@ -263,9 +352,15 @@ export function createBroadcastServer(options?: {
         res.end(JSON.stringify({ error: 'Campaña no encontrada' }))
         return
       }
-      db.prepare("UPDATE campaigns SET status = 'CANCELLED' WHERE id = ?").run(campaignId)
+      const tr = transitionCampaignStatus(db, campaignId, identity!.org, 'CANCELLED')
+      if (!tr.ok) {
+        const status = tr.code === 'NOT_FOUND' ? 404 : 409
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: tr.message, code: tr.code, currentStatus: tr.from }))
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, status: 'CANCELLED' }))
+      res.end(JSON.stringify({ ok: true, status: 'CANCELLED', previousStatus: tr.from }))
       return
     }
 
@@ -297,20 +392,48 @@ export function createBroadcastServer(options?: {
       return
     }
 
-    // 9. Ingesta de Leads en Tiempo Real — EXIGE HMAC (WEBHOOK_LEAD_SECRET) + timestamp + replay
+    // 9. Ingesta de Leads en Tiempo Real — EXIGE HMAC v2 (secreto POR ORGANIZACIÓN,
+    //    firma ligada a timestamp+org) + timestamp + replay durable.
+    //    La organización NUNCA se toma del body: viene del header X-Org-Id verificado
+    //    con el secreto registrado para esa organización (anti inyección cross-org).
     if (req.method === 'POST' && url.pathname === '/api/audiences/webhook-lead') {
+      // (fusión integral) rate limit 30/min por IP (429 + Retry-After) ANTES de leer cuerpo.
+      const leadRl = leadRate.check(`lead:${(typeof req.headers['x-forwarded-for'] === 'string' ? (req.headers['x-forwarded-for'] as string).split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown'}`, 30)
+      if (!leadRl.allowed) {
+        res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(leadRl.retryAfterSec) })
+        res.end(JSON.stringify({ error: 'Demasiadas peticiones (rate limit)' }))
+        return
+      }
       const rb = await readBody(req)
       if (!rb.ok) {
         res.writeHead(413, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
         return
       }
+      const rawOrg = typeof req.headers['x-org-id'] === 'string' ? (req.headers['x-org-id'] as string).trim() : ''
+      const orgForBinding = rawOrg || LEGACY_LEAD_ORG
+      if (leadSecretSpec.byOrg.size === 0) {
+        // Fail-closed estricto: sin secretos de ingesta configurados, NUNCA se acepta.
+        console.warn(`[Seguridad 2B ALERTA] Ingesta de leads rechazada: sin secretos de webhook configurados (IP: ${req.socket.remoteAddress})`)
+        res.writeHead(503, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Service Unavailable: secretos de ingesta de leads no configurados (fail-closed)' }))
+        return
+      }
+      const orgSecrets = resolveLeadSecrets(leadSecretSpec, orgForBinding)
+      if (!orgSecrets) {
+        console.warn(`[Seguridad 2B ALERTA] Ingesta de leads rechazada: organización de webhook desconocida (IP: ${req.socket.remoteAddress})`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized: organización de webhook desconocida (X-Org-Id)' }))
+        return
+      }
       const sec = checkWebhookSecurity(
         rb.body,
         req.headers['x-signature-sha256'] as string | undefined,
         req.headers['x-timestamp'] as string | undefined,
-        process.env.WEBHOOK_LEAD_SECRET,
+        orgSecrets,
         leadReplay,
+        Date.now(),
+        orgForBinding,
       )
       if (!sec.ok) {
         console.warn(`[Seguridad 2B ALERTA] Ingesta de leads rechazada: ${sec.error} (IP: ${req.socket.remoteAddress})`)
@@ -320,7 +443,18 @@ export function createBroadcastServer(options?: {
       }
       try {
         const payload = JSON.parse(rb.body)
-        const result = leadIngester.ingestLead(payload)
+        const result = leadIngester.ingestLead(payload, orgForBinding === LEGACY_LEAD_ORG ? undefined : orgForBinding)
+        if (!result.success && result.reason === 'CAMPAIGN_ORG_MISMATCH') {
+          // Rechazo anti-inyección cross-org SIN ORÁCULO (fusión integral): la firma
+          // era válida pero la campaña pertenece a OTRA organización → 404 genérico
+          // (jamás se confirma la existencia de campañas ajenas; ni 403 nombrándolas).
+          // NOTA (residual documentado): una campaña INEXISTENTE sigue la conducta
+          // heredada de fix/b3 (200 con resultado sin efectos) para no romper el
+          // contrato de ingesta de leads sin campaña válida.
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Not Found' }))
+          return
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(result))
       } catch (e: any) {
@@ -358,11 +492,16 @@ export function createBroadcastServer(options?: {
 
     // 11. Neuromarketing AI: Análisis de Mercado y Perfil Subconsciente
     if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/analyze') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const payload = JSON.parse(body)
+          const payload = JSON.parse(rb.body)
           const result = neuromarketingEngine.analyzeTargetMarket(payload)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -370,17 +509,22 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
     // 12. Neuromarketing AI: Generación Automática de Spintax Persuasivo
     if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/generate-spintax') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const payload = JSON.parse(body)
+          const payload = JSON.parse(rb.body)
           const result = neuromarketingEngine.generateNeuromarketingSpintax(payload)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
@@ -388,17 +532,22 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 
     // 13. Neuromarketing AI: Constructor de Master Prompt 360° para LLMs
     if (req.method === 'POST' && url.pathname === '/api/ai/neuromarketing/master-prompt') {
-      let body = ''
-      req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      // (reparación integral) body con límite 1MB → 413 (DoS de memoria cerrado)
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      {
         try {
-          const payload = JSON.parse(body)
+          const payload = JSON.parse(rb.body)
           const prompt = neuromarketingEngine.buildMasterPrompt(payload)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ masterPrompt: prompt }))
@@ -406,7 +555,7 @@ export function createBroadcastServer(options?: {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
-      })
+      }
       return
     }
 

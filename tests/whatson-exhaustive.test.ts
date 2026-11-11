@@ -16,7 +16,8 @@ class MockDispatcher {
 
 class MockLockChecker {
   busyPhones = new Set<string>()
-  async checkLock(phone: string) {
+  async checkLock(phone: string, organizationId: string) {
+        void organizationId
     if (this.busyPhones.has(phone)) {
       return { available: false, state: 'IN_FLOW_2A' }
     }

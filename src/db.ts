@@ -13,6 +13,10 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
 
   const db = new DatabaseSync(targetPath)
 
+  // (tercera reparación) WAL para concurrencia REAL multi-worker/réplica sobre el
+  // mismo archivo (workers concurrentes + recuperación sin bloqueos de escritura).
+  db.exec(`PRAGMA journal_mode=WAL;`)
+
   // Esquema SQLite privado de Capa 2B
   db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
@@ -89,8 +93,137 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
       created_at INTEGER NOT NULL
     );
 
+    -- (fusión integral) Idempotencia PERSISTENTE de eventos con efectos externos:
+-- clave orgId::eventId, purga a 7 días. Un evento repetido JAMÁS ejecuta dos veces.
+    CREATE TABLE IF NOT EXISTS event_idempotency (
+      key TEXT PRIMARY KEY,
+      claimed_at INTEGER NOT NULL
+    );
+
+    -- (fusión integral) Auditoría de identidades de servicio y acciones administrativas.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id TEXT PRIMARY KEY,
+      actor TEXT NOT NULL,
+      organization_id TEXT,
+      action TEXT NOT NULL,
+      resource TEXT,
+      detail TEXT,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_items_campaign ON campaign_items(campaign_id, status);
   `)
 
+  // ============================================================
+  // Migraciones aditivas y REVERSIBLES (reparación integral 2026-11-06)
+  // Documentación y rollback exacto en docs/MIGRACIONES.md.
+  //  - campaign_items.claimed_by / claimed_at → claim atómico del worker
+  //    (rollback: ALTER TABLE campaign_items DROP COLUMN claimed_by;
+  //               ALTER TABLE campaign_items DROP COLUMN claimed_at;)
+  //  - realtime_leads.organization_id → binding org de leads
+  //    (rollback: ALTER TABLE realtime_leads DROP COLUMN organization_id;)
+  // ============================================================
+  const itemCols = (db.prepare('PRAGMA table_info(campaign_items)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!itemCols.includes('claimed_by')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN claimed_by TEXT`)
+  }
+  if (!itemCols.includes('claimed_at')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN claimed_at INTEGER`)
+  }
+  // B4 — ORGANIZACIÓN EN CADA ÍTEM (identidad verificable en claim y despacho):
+  //  - campaign_items.organization_id: la org del ítem, escrita SIEMPRE al crear.
+  //  - Migración histórica: los ítems existentes heredan la organización de SU
+  //    campaña (la única fuente de verdad previa). Los ítems huérfanos (sin
+  //    campaña existente) quedan organization_id NULL y son CUARENTENADOS por
+  //    quarantineOrglessItems() al arrancar: jamás se reclaman ni despachan.
+  //  (rollback: ALTER TABLE campaign_items DROP COLUMN organization_id;)
+  if (!itemCols.includes('organization_id')) {
+    db.exec(`ALTER TABLE campaign_items ADD COLUMN organization_id TEXT`)
+  }
+  db.exec(`
+    UPDATE campaign_items
+    SET organization_id = (SELECT c.organization_id FROM campaigns c WHERE c.id = campaign_items.campaign_id)
+    WHERE organization_id IS NULL
+      AND EXISTS (SELECT 1 FROM campaigns c2 WHERE c2.id = campaign_items.campaign_id AND c2.organization_id IS NOT NULL)
+  `)
+  const leadCols = (db.prepare('PRAGMA table_info(realtime_leads)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!leadCols.includes('organization_id')) {
+    db.exec(`ALTER TABLE realtime_leads ADD COLUMN organization_id TEXT`)
+  }
+
+  // ============================================================
+  // v4 — TERCERA REPARACIÓN (5.B): SUPRESIÓN Y FATIGA POR ORGANIZACIÓN
+  //  - suppression_list: PK pasa de (phone) a (organization_id, phone).
+  //    Las filas globales legacy se copian CONSERVADORAMENTE a la nueva lista
+  //    GLOBAL restringida y auditable `global_suppression_list` (un opt-out
+  //    previo jamás deja de aplicarse; no se inventa atribución por org).
+  //    (rollback: ver docs/MIGRACIONES.md §v4)
+  //  - contact_fatigue: PK (organization_id, phone) — el descanso comercial es
+  //    de la relación con ESA organización. Filas legacy → '__legacy__'.
+  // ============================================================
+  const GLOBAL_LEGACY_REASON = 'migrado_v4: opt-out previo al aislamiento (política conservadora)'
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS global_suppression_list (
+      phone TEXT PRIMARY KEY,
+      reason TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `)
+
+  const suppCols = (db.prepare('PRAGMA table_info(suppression_list)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!suppCols.includes('organization_id')) {
+    // Copia conservadora de los opt-outs legacy a la lista global documentada
+    db.exec(`
+      INSERT OR IGNORE INTO global_suppression_list (phone, reason, created_at)
+        SELECT phone, '${GLOBAL_LEGACY_REASON}', created_at FROM suppression_list;
+    `)
+    db.exec(`
+      ALTER TABLE suppression_list RENAME TO suppression_list_v3old;
+      CREATE TABLE suppression_list (
+        organization_id TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (organization_id, phone)
+      );
+      DROP TABLE suppression_list_v3old;
+      CREATE INDEX IF NOT EXISTS idx_suppression_org ON suppression_list(organization_id, phone);
+    `)
+  }
+
+  const fatigueCols = (db.prepare('PRAGMA table_info(contact_fatigue)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!fatigueCols.includes('organization_id')) {
+    db.exec(`
+      ALTER TABLE contact_fatigue RENAME TO contact_fatigue_v3old;
+      CREATE TABLE contact_fatigue (
+        organization_id TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        last_broadcast_at INTEGER NOT NULL,
+        last_campaign_id TEXT NOT NULL,
+        PRIMARY KEY (organization_id, phone)
+      );
+      INSERT INTO contact_fatigue (organization_id, phone, last_broadcast_at, last_campaign_id)
+        SELECT '__legacy__', phone, last_broadcast_at, last_campaign_id FROM contact_fatigue_v3old;
+      DROP TABLE contact_fatigue_v3old;
+    `)
+  }
+
   return db
+}
+
+// (fusión integral) Registro de auditoría: la acción queda registrada con actor
+// TRUNCADO (jamás la clave completa) y organización (null = identidad de servicio).
+export function writeAudit(db: DatabaseSync, actor: string, orgId: string | null, action: string, resource?: string, detail?: string): void {
+  try {
+    db.prepare('INSERT INTO audit_log (id, actor, organization_id, action, resource, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      `aud_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      actor.slice(0, 8) + '…',
+      orgId,
+      action,
+      resource || null,
+      detail || null,
+      Math.floor(Date.now() / 1000),
+    )
+  } catch { /* la auditoría jamás rompe el tráfico */ }
 }
