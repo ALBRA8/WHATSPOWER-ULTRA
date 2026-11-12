@@ -10,8 +10,12 @@
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "node scripts/run-tests.mjs",
     "security:scan": "node scripts/scan-secrets.mjs",
+    "security:scan:history": "node scripts/scan-secrets.mjs --history",
+    "audit": "npm audit --audit-level=moderate",
     "tsc": "tsc --noEmit -p tsconfig.json",
-    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts"
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts tests/security-hardening.test.ts tests/scan-secrets.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

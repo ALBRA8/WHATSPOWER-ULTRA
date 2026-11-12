@@ -44,11 +44,24 @@ async function runPilotSafeguardsSuite() {
     const postData = await postRes.json() as any
     assert.strictEqual(postData.suppressed, true)
 
-    // 1.2 Verificar consulta GET
-    const getRes1 = await fetch(`${TEST_2A_URL}/api/internal/suppression/${TEST_PHONE}`)
+    // 1.2 Intento de GET sin cabecera de autenticación -> 401
+    const getNoAuth = await fetch(`${TEST_2A_URL}/api/internal/suppression/${TEST_PHONE}`)
+    assert.strictEqual(getNoAuth.status, 401, 'GET sin autenticación debe retornar 401')
+
+    // 1.3 Intento de GET con token inválido -> 401
+    const getBadAuth = await fetch(`${TEST_2A_URL}/api/internal/suppression/${TEST_PHONE}`, {
+      headers: { 'Authorization': 'Bearer token_malicioso_falso' },
+    })
+    assert.strictEqual(getBadAuth.status, 401, 'GET con token inválido debe retornar 401')
+
+    // 1.4 Consulta GET debidamente autorizada -> 200
+    const getRes1 = await fetch(`${TEST_2A_URL}/api/internal/suppression/${TEST_PHONE}`, {
+      headers: { 'Authorization': `Bearer ${validSecret}`, 'X-Org-Id': 'org_test' },
+    })
+    assert.strictEqual(getRes1.status, 200)
     const getData1 = await getRes1.json() as any
     assert.strictEqual(getData1.suppressed, true)
-    console.log('  ✅ [PASS] 1. Supresión protegida y persistida correctamente en Capa 2A')
+    console.log('  ✅ [PASS] 1. Supresión protegida y persistida correctamente en Capa 2A (con rechazo 401 a accesos anónimos)')
     passed++
 
     // 2.1 Intento de DELETE sin cabecera de autenticación -> 401
@@ -64,8 +77,11 @@ async function runPilotSafeguardsSuite() {
     })
     assert.strictEqual(delBadAuth.status, 401, 'DELETE con token inválido debe retornar 401')
 
-    // 2.3 Verificar que la supresión SIGUE intacta (no fue borrada)
-    const getRes2 = await fetch(`${TEST_2A_URL}/api/internal/suppression/${TEST_PHONE}`)
+    // 2.3 Verificar que la supresión SIGUE intacta (no fue borrada) consultando con auth
+    const getRes2 = await fetch(`${TEST_2A_URL}/api/internal/suppression/${TEST_PHONE}`, {
+      headers: { 'Authorization': `Bearer ${validSecret}`, 'X-Org-Id': 'org_test' },
+    })
+    assert.strictEqual(getRes2.status, 200)
     const getData2 = await getRes2.json() as any
     assert.strictEqual(getData2.suppressed, true, 'La supresión debe continuar activa tras intentos no autorizados')
     console.log('  ✅ [PASS] 2. Intento de eliminación no autorizado bloqueado estrictamente (401, baja intacta)')

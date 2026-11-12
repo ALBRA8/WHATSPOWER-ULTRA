@@ -33,6 +33,11 @@ export async function ensureAgentic2AServer(
       const orgId = (req.headers['x-org-id'] as string) || 'org_test'
 
       if (req.method === 'GET') {
+        if (!isAuthed) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Unauthorized: credencial de Capa 2A ausente o inválida' }))
+          return
+        }
         const isSupp = suppressedSet.has(phone)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ phone, suppressed: isSupp, organizationId: orgId }))
