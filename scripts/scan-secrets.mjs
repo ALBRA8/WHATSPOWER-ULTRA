@@ -52,6 +52,15 @@ const DUMMY_HINTS = [
 const SKIP_FILE_EXTENSIONS = /\.(png|jpe?g|gif|webp|pdf|zip|gz|ico|woff2?|ttf|db|sqlite3?|lock)$/i
 const SKIP_FILENAMES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'])
 
+export function shouldSkipFile(filePath) {
+  const normalized = filePath.replace(/\\/g, '/')
+  if (SKIP_FILE_EXTENSIONS.test(normalized)) return true
+  if (SKIP_FILENAMES.has(normalized)) return true
+  // Las bases de datos de allowlist y baseline del escáner no se auto-escanean
+  if (normalized.startsWith('scripts/security/')) return true
+  return false
+}
+
 export function mask(value) {
   if (!value || typeof value !== 'string') return '[REDACTED]'
   if (value.length <= 8) return '****'
@@ -156,7 +165,7 @@ export function scanWorkingTree() {
 
   const findings = []
   for (const file of files) {
-    if (SKIP_FILE_EXTENSIONS.test(file) || SKIP_FILENAMES.has(file)) continue
+    if (shouldSkipFile(file)) continue
     if (!existsSync(file)) continue
     try {
       const content = readFileSync(file, 'utf8')
@@ -193,7 +202,7 @@ export function scanGitHistory() {
         .filter(Boolean)
 
       for (const file of files) {
-        if (SKIP_FILE_EXTENSIONS.test(file) || SKIP_FILENAMES.has(file)) continue
+        if (shouldSkipFile(file)) continue
         const blobKey = `${commit.slice(0, 8)}:${file}`
         if (scannedBlobs.has(blobKey)) continue
         scannedBlobs.add(blobKey)
