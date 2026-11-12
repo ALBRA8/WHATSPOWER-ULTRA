@@ -11,6 +11,7 @@
     "test:e2e": "node scripts/run-tests.mjs",
     "security:scan": "node scripts/scan-secrets.mjs",
     "security:scan:history": "node scripts/scan-secrets.mjs --history",
+    "security:baseline:audit": "node scripts/audit-baseline.mjs",
     "audit": "npm audit --audit-level=moderate",
     "tsc": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint src/ tests/ scripts/",

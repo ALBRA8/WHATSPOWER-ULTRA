@@ -29,6 +29,8 @@ jobs:
         run: npm run security:scan
       - name: Escáner de secretos en historial Git
         run: npm run security:scan:history
+      - name: Auditoría de baseline de secretos (directa e inversa)
+        run: npm run security:baseline:audit
       - name: Suite completa de pruebas (incluye AUTH, ORG, OWN, WH, TR, ENV, circuito de bajas y autenticación real)
         run: npm test
         env:

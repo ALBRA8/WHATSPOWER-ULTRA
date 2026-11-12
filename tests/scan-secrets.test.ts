@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
+import { readFileSync } from 'node:fs'
 import {
   scanText,
   mask,
@@ -18,6 +19,7 @@ import {
   type AllowlistEntry,
   type BaselineEntry,
 } from '../scripts/scan-secrets.mjs'
+import { auditBaseline } from '../scripts/audit-baseline.mjs'
 
 const SHA_VALID_A = '11223344556677889900aabbccddeeff00112233'
 const SHA_VALID_B = '1122334499887766554433221100ffeeddccbbaa' // comparte los primeros 8 chars con A
@@ -432,5 +434,245 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     const findings = scanText(badContent, 'scripts/security/secret-allowlist.json')
     assert.strictEqual(findings.length, 1)
     assert.strictEqual(findings[0].pattern, 'GITHUB_PAT')
+  })
+
+  // -------------------------------------------------------------------------
+  // AUDIT-01 a AUDIT-13: Auditoría integral directa e inversa del baseline
+  // -------------------------------------------------------------------------
+  it('AUDIT-01: Auditoría directa real del baseline verifica que las 54 entradas son íntegras y válidas', () => {
+    const result = auditBaseline({ scanHistory: false })
+    assert.strictEqual(result.total, 54)
+    assert.strictEqual(result.invalid.length, 0, 'No debe haber entradas INVALID en el baseline real')
+    assert.strictEqual(result.duplicates.length, 0, 'No debe haber entradas duplicadas en el baseline')
+    assert.strictEqual(result.synthetic.length, 54, 'Todas las entradas de prueba deben estar identificadas como SYNTHETIC')
+  })
+
+  it('AUDIT-02: SHA inexistente en commit es detectado y clasificado como INVALID', () => {
+    const fakeBaseline = [
+      {
+        commit: '0000000000000000000000000000000000000000',
+        file: 'tests/scan-secrets.test.ts',
+        category: 'JWT',
+        fingerprint: '112233445566',
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+    const result = auditBaseline({
+      scanHistory: false,
+      baselineEntries: fakeBaseline,
+    })
+    assert.strictEqual(result.invalid.length, 1)
+    assert.match(result.invalid[0].reason, /Commit no existe/)
+  })
+
+  it('AUDIT-03: Archivo inexistente en el commit indicado es clasificado como INVALID', () => {
+    const realBaseline = JSON.parse(readFileSync('scripts/security/secret-baseline.json', 'utf8'))
+    const testBaseline = [
+      {
+        commit: realBaseline[0].commit,
+        file: 'tests/archivo_inexistente_en_este_commit.ts',
+        category: realBaseline[0].category,
+        fingerprint: realBaseline[0].fingerprint,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+    const result = auditBaseline({
+      scanHistory: false,
+      baselineEntries: testBaseline,
+    })
+    assert.strictEqual(result.invalid.length, 1)
+    assert.match(result.invalid[0].reason, /no existía en el commit/)
+  })
+
+  it('AUDIT-04: Categoría incorrecta es detectada y clasificada como INVALID', () => {
+    const realBaseline = JSON.parse(readFileSync('scripts/security/secret-baseline.json', 'utf8'))
+    const testBaseline = [
+      {
+        commit: realBaseline[0].commit,
+        file: realBaseline[0].file,
+        category: 'AWS_ACCESS_KEY', // categoría errónea
+        fingerprint: realBaseline[0].fingerprint,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+    const result = auditBaseline({
+      scanHistory: false,
+      baselineEntries: testBaseline,
+    })
+    assert.strictEqual(result.invalid.length, 1)
+    assert.match(result.invalid[0].reason, /No se detectó hallazgo con categoría/)
+  })
+
+  it('AUDIT-05: Huella incorrecta es detectada y clasificada como INVALID', () => {
+    const realBaseline = JSON.parse(readFileSync('scripts/security/secret-baseline.json', 'utf8'))
+    const testBaseline = [
+      {
+        commit: realBaseline[0].commit,
+        file: realBaseline[0].file,
+        category: realBaseline[0].category,
+        fingerprint: 'ffffffffffff', // huella inexistente
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+    const result = auditBaseline({
+      scanHistory: false,
+      baselineEntries: testBaseline,
+    })
+    assert.strictEqual(result.invalid.length, 1)
+    assert.match(result.invalid[0].reason, /No se detectó hallazgo con categoría/)
+  })
+
+  it('AUDIT-06: Entrada duplicada en baseline es detectada en duplicates', () => {
+    const realBaseline = JSON.parse(readFileSync('scripts/security/secret-baseline.json', 'utf8'))
+    const testBaseline = [realBaseline[0], realBaseline[0]] // idéntica
+    const result = auditBaseline({
+      scanHistory: false,
+      baselineEntries: testBaseline,
+    })
+    assert.strictEqual(result.duplicates.length, 1)
+  })
+
+  it('AUDIT-07: Entrada huérfana en baseline (sin hallazgo en historial Git) es detectada', () => {
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('rev-list')) return '1122334455667788990011223344556677889900'
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('cat-file -e')) return ''
+      if (cmd.includes('git show') && cmd.includes('--name-only')) return 'tests/foo.ts\n'
+      if (cmd.includes('git show')) return 'export const clean = 1\n'
+      return ''
+    }
+    const fakeBaseline = [
+      {
+        commit: '1122334455667788990011223344556677889900',
+        file: 'tests/foo.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: '112233445566',
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: fakeBaseline,
+    })
+    assert.strictEqual(result.orphanedEntries.length, 1)
+  })
+
+  it('AUDIT-08: Hallazgo histórico no autorizado es detectado en unauthorizedFindings', () => {
+    const fakeToken = ['EAAG', 'unauthHistToken1234567890123456'].join('')
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('rev-list')) return '1122334455667788990011223344556677889900'
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('cat-file -e')) return ''
+      if (cmd.includes('git show') && cmd.includes('--name-only')) return 'src/unauth.ts\n'
+      if (cmd.includes('git show')) return `const token = "${fakeToken}"\n`
+      return ''
+    }
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: [],
+    })
+    assert.strictEqual(result.unauthorizedFindings.length, 1)
+  })
+
+  it('AUDIT-09: Fixture sintético en archivo de pruebas es clasificado como SYNTHETIC', () => {
+    const realBaseline = JSON.parse(readFileSync('scripts/security/secret-baseline.json', 'utf8'))
+    const entry = realBaseline.find((b: any) => b.file.startsWith('tests/'))
+    assert.ok(entry, 'Debe existir al menos un fixture en tests/')
+    const result = auditBaseline({
+      scanHistory: false,
+      baselineEntries: [entry],
+    })
+    assert.strictEqual(result.synthetic.length, 1)
+    assert.strictEqual(result.verified.length, 0)
+    assert.strictEqual(result.invalid.length, 0)
+  })
+
+  it('AUDIT-10: Manipulación de ruta es normalizada estrictamente y no confunde destinos', () => {
+    assert.strictEqual(normalizePath('tests/../tests/foo.ts'), 'tests/../tests/foo.ts')
+    assert.notStrictEqual(normalizePath('tests/../tests/foo.ts'), 'tests/foo.ts')
+    assert.strictEqual(normalizePath('\\tests\\foo.ts'), '/tests/foo.ts')
+  })
+
+  it('AUDIT-11: Colisión de prefijos SHA no autoriza registros cruzados en auditoría inversa', () => {
+    const fakeToken = ['EAAG', 'prefixCollisionToken123456789012'].join('')
+    const fp = computeFingerprint(fakeToken)
+    const commitA = '1122334455667788990011223344556677889900'
+    const commitB = '1122334499887766554433221100ffeeddccbbaa' // comparte primeros 8 chars
+
+    const baseline = [
+      {
+        commit: commitA,
+        file: 'tests/fixture.ts',
+        category: 'META_TOKEN',
+        fingerprint: fp,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('rev-list')) return commitB
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('cat-file -e')) return ''
+      if (cmd.includes('git show') && cmd.includes('--name-only')) return 'tests/fixture.ts\n'
+      if (cmd.includes('git show')) return `const tok = "${fakeToken}"\n`
+      return ''
+    }
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: baseline,
+    })
+    assert.strictEqual(result.unauthorizedFindings.length, 1)
+    assert.strictEqual(result.orphanedEntries.length, 1)
+  })
+
+  it('AUDIT-12: Baseline con JSON corrupto o inválido lanza excepción fail-closed', () => {
+    assert.throws(
+      () =>
+        auditBaseline({
+          readFn: () => 'corrupted-json-not-valid{',
+        }),
+      /JSON de baseline corrupto o inválido/
+    )
+  })
+
+  it('AUDIT-13: Comprobación inversa completa: cotejo entre historial y baseline', () => {
+    const fakeToken = ['EAAG', 'histTokenValidExactMatch123456789'].join('')
+    const fp = computeFingerprint(fakeToken)
+    const commitExact = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+    const baseline = [
+      {
+        commit: commitExact,
+        file: 'tests/fixture.ts',
+        category: 'META_TOKEN',
+        fingerprint: fp,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('rev-list')) return commitExact
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('cat-file -e')) return ''
+      if (cmd.includes('git show') && cmd.includes('--name-only')) return 'tests/fixture.ts\n'
+      if (cmd.includes('git show')) return `const tok = "${fakeToken}"\n`
+      return ''
+    }
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: baseline,
+    })
+
+    assert.strictEqual(result.unauthorizedFindings.length, 0)
+    assert.strictEqual(result.orphanedEntries.length, 0)
+    assert.strictEqual(result.historyFindingsMatchingBaseline, 1)
   })
 })
