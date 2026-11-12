@@ -9,6 +9,20 @@ import {
   PATTERNS,
   ALLOW_MARK,
 } from '../scripts/scan-secrets.mjs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+function runBaselineCase(baseline: unknown[], finding: unknown) {
+  const dir = mkdtempSync(join(tmpdir(), 'scan-secrets-baseline-'))
+  const baselinePath = join(dir, 'baseline.json')
+  writeFileSync(baselinePath, JSON.stringify(baseline), 'utf8')
+  try {
+    return filterBaseline([finding] as any[], baselinePath)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 describe('SECRETS SCANNER: corrección de lastIndex y pruebas de regresión', () => {
   it('SEC-01: ningún patrón de expresión regular tiene bandera "g" en .test() (inmunidad a lastIndex)', () => {
@@ -127,139 +141,95 @@ describe('SECRETS SCANNER: corrección de lastIndex y pruebas de regresión', ()
     assert.strictEqual(kept[0].pattern, 'OPENAI_KEY')
   })
 
-  it('SEC-07: baseline endurecido — una huella conocida en un NUEVO commit se marca como violación (isNew)', () => {
-    // Simulamos un baseline histórico con un commit viejo y un archivo concreto
-    const baselineMock = [
-      {
-        commit: '11223344',
-        file: 'tests/old-test.ts',
-        category: 'META_TOKEN',
-        fingerprint: 'cafebeef1234',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
-      },
-    ]
-
-    // Llega un commit NUEVO con la MISMA huella
-    const findings = [
-      {
-        pattern: 'META_TOKEN',
-        desc: 'Meta Token',
-        source: 'commit 99887766 (tests/old-test.ts)',
-        line: 15,
-        preview: 'EAAG…(30 caracteres)',
-        fingerprint: 'cafebeef1234',
-      },
-    ]
-
-    // Evaluar con lógica de baseline vinculada a commit + archivo
-    const known: any[] = []
-    const isNew: any[] = []
-    for (const f of findings) {
-      const src = f.source.match(/^commit\s+([0-9a-fA-F]+)\s+\((.+)\)$/)
-      const commit = src ? src[1] : ''
-      const file = src ? src[2] : ''
-      const match = baselineMock.find(
-        (b) =>
-          b.category === f.pattern &&
-          b.fingerprint === f.fingerprint &&
-          commit.toLowerCase().startsWith(b.commit.toLowerCase()) &&
-          file.endsWith(b.file)
-      )
-      if (match) known.push(f)
-      else isNew.push(f)
+  it('SEC-07: filterBaseline real rechaza la misma huella en un commit nuevo', () => {
+    const baseline = [{
+      commit: '11223344',
+      file: 'tests/old-test.ts',
+      category: 'META_TOKEN',
+      fingerprint: 'cafebeef1234',
+      status: 'synthetic-test-fixture',
+      rotation: 'dummy',
+    }]
+    const finding = {
+      pattern: 'META_TOKEN',
+      desc: 'Meta Token',
+      source: 'commit 99887766 (tests/old-test.ts)',
+      line: 15,
+      preview: 'EAAG…(30 caracteres)',
+      fingerprint: 'cafebeef1234',
     }
 
-    assert.strictEqual(isNew.length, 1, 'Un secreto en un nuevo commit DEBE ser marcado como nuevo/violación')
-    assert.strictEqual(known.length, 0, 'No debe ser absorbido por el baseline histórico')
+    const result = runBaselineCase(baseline, finding)
+    assert.strictEqual(result.isNew.length, 1)
+    assert.strictEqual(result.known.length, 0)
   })
 
-  it('SEC-08: baseline endurecido — una huella conocida en un ARCHIVO DISTINTO se marca como violación (isNew)', () => {
-    const baselineMock = [
-      {
-        commit: '11223344',
-        file: 'tests/legitimate-test.ts',
-        category: 'CONFIG_SECRET',
-        fingerprint: 'deadbeef5678',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
-      },
-    ]
-
-    // Mismo commit pero en src/production-file.ts
-    const findings = [
-      {
-        pattern: 'CONFIG_SECRET',
-        desc: 'Config Secret',
-        source: 'commit 11223344 (src/production-file.ts)',
-        line: 42,
-        preview: 'secr…(25 caracteres)',
-        fingerprint: 'deadbeef5678',
-      },
-    ]
-
-    const known: any[] = []
-    const isNew: any[] = []
-    for (const f of findings) {
-      const src = f.source.match(/^commit\s+([0-9a-fA-F]+)\s+\((.+)\)$/)
-      const commit = src ? src[1] : ''
-      const file = src ? src[2] : ''
-      const match = baselineMock.find(
-        (b) =>
-          b.category === f.pattern &&
-          b.fingerprint === f.fingerprint &&
-          commit.toLowerCase().startsWith(b.commit.toLowerCase()) &&
-          file.endsWith(b.file)
-      )
-      if (match) known.push(f)
-      else isNew.push(f)
+  it('SEC-08: filterBaseline real rechaza la misma huella en otra ruta', () => {
+    const baseline = [{
+      commit: '11223344',
+      file: 'tests/legitimate-test.ts',
+      category: 'CONFIG_SECRET',
+      fingerprint: 'deadbeef5678',
+      status: 'synthetic-test-fixture',
+      rotation: 'dummy',
+    }]
+    const finding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Config Secret',
+      source: 'commit 11223344 (src/production-file.ts)',
+      line: 42,
+      preview: 'secr…(25 caracteres)',
+      fingerprint: 'deadbeef5678',
     }
 
-    assert.strictEqual(isNew.length, 1, 'El mismo secreto en un archivo no autorizado en el baseline debe ser violación')
-    assert.strictEqual(known.length, 0)
+    const result = runBaselineCase(baseline, finding)
+    assert.strictEqual(result.isNew.length, 1)
+    assert.strictEqual(result.known.length, 0)
   })
 
-  it('SEC-09: baseline endurecido — solo cuando coinciden commit, archivo, categoría y huella se acepta como conocido', () => {
-    const baselineMock = [
-      {
-        commit: '11223344',
-        file: 'tests/legitimate-test.ts',
-        category: 'CONFIG_SECRET',
-        fingerprint: 'deadbeef5678',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
-      },
-    ]
-
-    const findings = [
-      {
-        pattern: 'CONFIG_SECRET',
-        desc: 'Config Secret',
-        source: 'commit 11223344 (tests/legitimate-test.ts)',
-        line: 10,
-        preview: 'secr…(25 caracteres)',
-        fingerprint: 'deadbeef5678',
-      },
-    ]
-
-    const known: any[] = []
-    const isNew: any[] = []
-    for (const f of findings) {
-      const src = f.source.match(/^commit\s+([0-9a-fA-F]+)\s+\((.+)\)$/)
-      const commit = src ? src[1] : ''
-      const file = src ? src[2] : ''
-      const match = baselineMock.find(
-        (b) =>
-          b.category === f.pattern &&
-          b.fingerprint === f.fingerprint &&
-          commit.toLowerCase().startsWith(b.commit.toLowerCase()) &&
-          file.endsWith(b.file)
-      )
-      if (match) known.push(f)
-      else isNew.push(f)
+  it('SEC-09: filterBaseline real solo acepta coincidencia exacta de commit, ruta, categoría y huella', () => {
+    const baseline = [{
+      commit: '11223344',
+      file: 'tests/legitimate-test.ts',
+      category: 'CONFIG_SECRET',
+      fingerprint: 'deadbeef5678',
+      status: 'synthetic-test-fixture',
+      rotation: 'dummy',
+    }]
+    const finding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Config Secret',
+      source: 'commit 11223344 (tests/legitimate-test.ts)',
+      line: 10,
+      preview: 'secr…(25 caracteres)',
+      fingerprint: 'deadbeef5678',
     }
 
-    assert.strictEqual(known.length, 1, 'Debe ser reconocido como conocido si coincide commit, archivo, categoría y huella')
-    assert.strictEqual(isNew.length, 0)
+    const result = runBaselineCase(baseline, finding)
+    assert.strictEqual(result.known.length, 1)
+    assert.strictEqual(result.isNew.length, 0)
+  })
+
+  it('SEC-10: filterBaseline real rechaza coincidencias por sufijo de ruta', () => {
+    const baseline = [{
+      commit: '11223344',
+      file: 'tests/legitimate-test.ts',
+      category: 'CONFIG_SECRET',
+      fingerprint: 'deadbeef5678',
+      status: 'synthetic-test-fixture',
+      rotation: 'dummy',
+    }]
+    const finding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Config Secret',
+      source: 'commit 11223344 (attacker/tests/legitimate-test.ts)',
+      line: 10,
+      preview: 'secr…(25 caracteres)',
+      fingerprint: 'deadbeef5678',
+    }
+
+    const result = runBaselineCase(baseline, finding)
+    assert.strictEqual(result.isNew.length, 1)
+    assert.strictEqual(result.known.length, 0)
   })
 })
