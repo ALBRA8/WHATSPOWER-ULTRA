@@ -102,6 +102,7 @@ export function scanText(text, source = 'inline') {
           line: lineNo,
           preview: mask(raw),
           fingerprint,
+          raw,
         })
       }
     }
@@ -112,13 +113,13 @@ export function scanText(text, source = 'inline') {
 
 export function validateAllowlist(entries) {
   if (!Array.isArray(entries)) {
-    throw new Error('Allowlist inválida: el contenido raíz debe ser un array JSON')
+    throw new Error('Allowlist inválida: el contenido raíz debe ser un array JSON (fail-closed)')
   }
   const validCategories = new Set(PATTERNS.map((p) => p.id))
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i]
     if (!e || typeof e !== 'object') {
-      throw new Error(`Allowlist entrada #${i} inválida: debe ser un objeto JSON`)
+      throw new Error(`Allowlist entrada #${i} inválida: debe ser un objeto JSON (fail-closed)`)
     }
     if (typeof e.file !== 'string' || !e.file.trim() || e.file === '*' || e.file.includes('*')) {
       throw new Error(`Allowlist entrada #${i} inválida: 'file' debe ser una ruta específica y no comodín ('*')`)
@@ -132,19 +133,25 @@ export function validateAllowlist(entries) {
     if (typeof e.reason !== 'string' || !e.reason.trim()) {
       throw new Error(`Allowlist entrada #${i} inválida: 'reason' es obligatoria y debe justificar la excepción`)
     }
+    if (e.matchPrefix !== undefined && (typeof e.matchPrefix !== 'string' || !e.matchPrefix.trim())) {
+      throw new Error(`Allowlist entrada #${i} inválida: 'matchPrefix' debe ser una cadena no vacía`)
+    }
+    if (e.synthetic !== undefined && typeof e.synthetic !== 'boolean') {
+      throw new Error(`Allowlist entrada #${i} inválida: 'synthetic' debe ser un booleano`)
+    }
   }
   return true
 }
 
 export function validateBaseline(entries) {
   if (!Array.isArray(entries)) {
-    throw new Error('Baseline inválido: el contenido raíz debe ser un array JSON')
+    throw new Error('Baseline inválido: el contenido raíz debe ser un array JSON (fail-closed)')
   }
   const validCategories = new Set(PATTERNS.map((p) => p.id))
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i]
     if (!e || typeof e !== 'object') {
-      throw new Error(`Baseline entrada #${i} inválida: debe ser un objeto JSON`)
+      throw new Error(`Baseline entrada #${i} inválida: debe ser un objeto JSON (fail-closed)`)
     }
     if (typeof e.commit !== 'string' || !/^[0-9a-fA-F]{40}$/.test(e.commit)) {
       throw new Error(`Baseline entrada #${i} inválida: 'commit' debe ser un hash Git SHA-1 completo de exactamente 40 caracteres hexadecimales`)
@@ -176,13 +183,19 @@ export function loadJsonList(filePath, required = true) {
 }
 
 export function filterAllowlist(findings, allowlistOrPath) {
-  const entries = Array.isArray(allowlistOrPath) ? allowlistOrPath : loadJsonList(allowlistOrPath)
+  const entries = Array.isArray(allowlistOrPath) ? allowlistOrPath : loadJsonList(allowlistOrPath, true)
   validateAllowlist(entries)
   const kept = []
   const excluded = []
 
   for (const f of findings) {
     const src = parseSource(f.source)
+    // Coherencia con control histórico: la allowlist JAMÁS autoriza hallazgos del historial Git
+    if (src.isHistory) {
+      kept.push(f)
+      continue
+    }
+
     const normFile = normalizePath(src.file)
     const match = entries.find(
       (a) =>
@@ -190,8 +203,18 @@ export function filterAllowlist(findings, allowlistOrPath) {
         a.fingerprint.toLowerCase() === f.fingerprint.toLowerCase() &&
         normFile === normalizePath(a.file)
     )
-    if (match) excluded.push({ ...f, reason: match.reason })
-    else kept.push(f)
+
+    if (match) {
+      // Criterio de autorización estricto y verificable:
+      // Si la regla define un matchPrefix, el hallazgo debe contener ese prefijo sintético
+      if (match.matchPrefix && f.raw && !f.raw.startsWith(match.matchPrefix)) {
+        kept.push(f)
+        continue
+      }
+      excluded.push({ ...f, reason: match.reason, authorizedBy: 'allowlist' })
+    } else {
+      kept.push(f)
+    }
   }
 
   return { kept, excluded }
@@ -337,8 +360,7 @@ function main() {
     let historyViolations = []
     if (doHistory) {
       const historyFindings = scanGitHistory()
-      const { kept: historyAfterAllowlist } = filterAllowlist(historyFindings, allowlistPath)
-      const { isNew, known } = filterBaseline(historyAfterAllowlist, baselinePath)
+      const { isNew, known } = filterBaseline(historyFindings, baselinePath)
       if (known.length > 0) {
         console.log(`ℹ️  ${known.length} hallazgo(s) históricos conocidos en baseline (${baselinePath}):`)
         for (const k of known) {

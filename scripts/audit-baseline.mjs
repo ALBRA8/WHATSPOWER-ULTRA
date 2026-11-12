@@ -1,22 +1,26 @@
 #!/usr/bin/env node
 /**
- * audit-baseline.mjs — Auditoría integral directa e inversa del baseline de secretos.
+ * audit-baseline.mjs — Auditoría integral directa e inversa del baseline y allowlist de secretos.
  *
  * Requisitos certificados de la Fase 2 WHATSPOWER-ULTRA:
  *   1. Auditoría directa de cada entrada en secret-baseline.json:
  *      - Existencia real del commit (SHA completo de 40 caracteres hexadecimales).
  *      - Existencia del archivo en ese commit específico.
  *      - Presencia real del secreto/patrón con la categoría y huella exactas.
- *      - Clasificación estricta: VERIFIED (real histórico), SYNTHETIC (fixture de prueba), INVALID.
+ *      - Clasificación estricta: VERIFIED (real histórico rotado), SYNTHETIC (fixture con evidencia verificable), INVALID.
  *      - Detección de duplicados.
  *   2. Auditoría inversa del historial Git completo:
  *      - Inspección de todos los commits históricos y sus blobs.
  *      - Verificación de que cada entrada del baseline corresponde a un hallazgo histórico real.
- *      - Detección de entradas huérfanas o sin correspondencia histórica.
- *      - Detección de hallazgos históricos no autorizados.
- *   3. Enmascaramiento total: jamás se imprime un secreto en claro.
- *   4. Comportamiento fail-closed: finaliza con código 0 únicamente si el 100%
- *      de las comprobaciones pasa; finaliza con código 1 ante cualquier inconsistencia.
+ *      - Detección de entradas huérfanas en el baseline.
+ *      - Detección de hallazgos históricos no autorizados (la allowlist NO autoriza historial).
+ *   3. Auditoría directa e inversa de la allowlist en el árbol de trabajo:
+ *      - Verificación de formato, sintaxis y criterios estrictos de autorización (matchPrefix).
+ *      - Detección de entradas huérfanas en allowlist (sin hallazgo activo en el árbol de trabajo).
+ *      - Detección de secretos no autorizados en el árbol de trabajo.
+ *   4. Comportamiento fail-closed: si la allowlist o baseline no existen o contienen JSON inválido,
+ *      se aborta de inmediato con código 1 (jamás continúa silenciosamente con listas vacías).
+ *   5. Enmascaramiento total: jamás se imprime un secreto en claro.
  */
 import { execSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
@@ -24,6 +28,7 @@ import { resolve } from 'node:path'
 import {
   scanText,
   scanGitHistory,
+  scanWorkingTree,
   normalizePath,
   parseSource,
   validateBaseline,
@@ -32,42 +37,98 @@ import {
   mask,
 } from './scan-secrets.mjs'
 
+/**
+ * Valida que un hallazgo sintético cuente con evidencia verificable tanto en el token
+ * como en la estructura circundante del código (arnés de pruebas, aserciones, etc.).
+ * Prohibido clasificar como sintético por simple ruta de archivo.
+ */
+export function verifySyntheticEvidence(entry, blobContent, detectedFindings) {
+  if (entry.status !== 'synthetic-test-fixture') {
+    return false
+  }
+  if (!blobContent || typeof blobContent !== 'string') {
+    return false
+  }
+
+  const SYNTHETIC_TOKEN_HINTS = [
+    /dummy/i, /test/i, /mock/i, /placeholder/i, /fake/i, /wrong/i,
+    /daemon_secret/i, /secreto-servicio/i, /secreto-otro/i, /EAAG_token_/i,
+    /ficticio/i, /ignorado/i, /sample/i, /1234567890/, /000000/,
+    /ultra_test_/i, /ultra_t3_/i, /secreto_compartido_tests/i,
+    /clave_/i, /erronea/i, /erroneo/i, /min16chars/i, /min24chars/i,
+  ]
+  const TEST_CONTEXT_HINTS = [
+    /\bdescribe\s*\(/, /\bit\s*\(/, /\btest\s*\(/, /\bexpect\s*\(/,
+    /\bassert\b/, /\bmockMode\b/, /\bbeforeEach\s*\(/, /\bafterEach\s*\(/,
+    /rotation/i, /synthetic/i,
+  ]
+
+  // Debe haber presencia demostrable de contexto de pruebas o arnés de validación
+  const hasTestContext = TEST_CONTEXT_HINTS.some((re) => re.test(blobContent))
+  if (!hasTestContext) return false
+
+  // Debe verificarse que los hallazgos contengan marcadores de fixtures sintéticos
+  for (const f of detectedFindings) {
+    if (f.raw && SYNTHETIC_TOKEN_HINTS.some((re) => re.test(f.raw))) {
+      return true
+    }
+    if (f.preview && SYNTHETIC_TOKEN_HINTS.some((re) => re.test(f.preview))) {
+      return true
+    }
+  }
+
+  // Buscar en las líneas específicas del blob donde se detectaron los hallazgos
+  const lines = blobContent.split('\n')
+  for (const f of detectedFindings) {
+    const lineIdx = (f.line || 1) - 1
+    const contextRange = lines.slice(Math.max(0, lineIdx - 3), Math.min(lines.length, lineIdx + 4)).join('\n')
+    if (SYNTHETIC_TOKEN_HINTS.some((re) => re.test(contextRange))) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export function auditBaseline(options = {}) {
   const execFn = options.execFn || execSync
   const readFn = options.readFn || readFileSync
   const baselinePath = options.baselinePath || resolve('scripts/security/secret-baseline.json')
   const allowlistPath = options.allowlistPath || resolve('scripts/security/secret-allowlist.json')
   const runHistoryScan = options.scanHistory !== false
+  const runTreeScan = options.scanWorkingTree !== false
 
+  // Carga fail-closed del baseline
   let baselineEntries
   if (options.baselineEntries && Array.isArray(options.baselineEntries)) {
     baselineEntries = options.baselineEntries
   } else if (!existsSync(baselinePath)) {
-    throw new Error(`Archivo baseline no encontrado: ${baselinePath}`)
+    throw new Error(`Archivo baseline no encontrado: ${baselinePath} (fail-closed)`)
   } else {
     try {
       const content = readFn(baselinePath, 'utf8')
       baselineEntries = JSON.parse(content)
     } catch (err) {
-      throw new Error(`JSON de baseline corrupto o inválido: ${err.message}`)
+      throw new Error(`JSON de baseline corrupto o inválido en ${baselinePath} (fail-closed): ${err.message}`)
     }
   }
   validateBaseline(baselineEntries)
 
-  let allowlistEntries = []
+  // Carga fail-closed de la allowlist (NUNCA continuar silenciosamente si falta o es inválida)
+  let allowlistEntries
   if (options.allowlistEntries && Array.isArray(options.allowlistEntries)) {
     allowlistEntries = options.allowlistEntries
-  } else if (existsSync(allowlistPath)) {
+  } else if (!existsSync(allowlistPath)) {
+    throw new Error(`Archivo allowlist no encontrado: ${allowlistPath} (fail-closed)`)
+  } else {
     try {
       const content = readFn(allowlistPath, 'utf8')
       allowlistEntries = JSON.parse(content)
     } catch (err) {
-      allowlistEntries = []
+      throw new Error(`JSON de allowlist corrupto o inválido en ${allowlistPath} (fail-closed): ${err.message}`)
     }
   }
-  if (allowlistEntries.length > 0) {
-    validateAllowlist(allowlistEntries)
-  }
+  validateAllowlist(allowlistEntries)
 
   // -------------------------------------------------------------------------
   // 1. Auditoría directa de las entradas del baseline
@@ -76,7 +137,7 @@ export function auditBaseline(options = {}) {
   const duplicates = []
   const seenEntries = new Set()
 
-  // Carga eficiente de commits válidos del repositorio para evitar sobrecarga de subprocesos
+  // Carga eficiente de commits válidos del repositorio
   const validCommits = new Set()
   try {
     const revOutput = execFn('git rev-list --all', { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
@@ -85,7 +146,7 @@ export function auditBaseline(options = {}) {
       if (c) validCommits.add(c)
     }
   } catch (err) {
-    // Si falla execFn (e.g. en mocks controlados), fallback a comprobación individual
+    // Fallback a comprobación individual en mocks o entornos sin repo completo
   }
 
   // Caché de blobs por (commit:file) para deduplicar lecturas de Git
@@ -105,6 +166,7 @@ export function auditBaseline(options = {}) {
     let findingExists = false
     let detectedFindings = []
     let reason = ''
+    let blobContent = null
 
     // Validar SHA de 40 caracteres hexadecimales
     if (!/^[0-9a-fA-F]{40}$/.test(entry.commit)) {
@@ -127,8 +189,6 @@ export function auditBaseline(options = {}) {
     if (commitExists) {
       const normFile = normalizePath(entry.file)
       const blobKey = `${entry.commit.toLowerCase()}:${normFile}`
-
-      let blobContent
       let blobError = null
 
       if (blobCache.has(blobKey)) {
@@ -168,14 +228,23 @@ export function auditBaseline(options = {}) {
       }
     }
 
-    // Clasificación individual de la entrada
+    // Clasificación respaldada por evidencia verificable (NUNCA por mera ruta tests/)
     let classification = 'INVALID'
     if (commitExists && fileExists && findingExists) {
-      const isSynthetic =
-        entry.file.startsWith('tests/') ||
-        entry.file.startsWith('scripts/security/') ||
-        entry.status === 'synthetic-test-fixture'
-      classification = isSynthetic ? 'SYNTHETIC' : 'VERIFIED'
+      if (entry.status === 'synthetic-test-fixture') {
+        const hasEvidence = verifySyntheticEvidence(entry, blobContent, detectedFindings)
+        if (hasEvidence) {
+          classification = 'SYNTHETIC'
+        } else {
+          classification = 'INVALID'
+          reason = `Fixture clasificado como 'synthetic-test-fixture' sin evidencia verificable en ${entry.file}`
+        }
+      } else if (entry.status === 'revoked-and-rotated' || entry.status === 'historical-revoked') {
+        classification = 'VERIFIED'
+      } else {
+        classification = 'INVALID'
+        reason = `Estado de baseline no reconocido: ${entry.status}`
+      }
     }
 
     directAuditResults.push({
@@ -200,13 +269,12 @@ export function auditBaseline(options = {}) {
   const invalid = directAuditResults.filter((r) => r.classification === 'INVALID')
 
   // -------------------------------------------------------------------------
-  // 2. Auditoría inversa: cotejo exhaustivo con el historial Git
+  // 2. Auditoría inversa del historial Git (autorización EXCLUSIVA por baseline)
   // -------------------------------------------------------------------------
   const matchedBaselineIndices = new Set()
   const unauthorizedFindings = []
   let totalHistoryFindings = 0
   let historyFindingsMatchingBaseline = 0
-  let historyFindingsMatchingAllowlist = 0
 
   if (runHistoryScan) {
     const historyFindings = scanGitHistory({ execFn })
@@ -237,30 +305,66 @@ export function auditBaseline(options = {}) {
 
       if (matchedInBaseline) {
         historyFindingsMatchingBaseline++
-        continue
-      }
-
-      // Si no coincide con baseline, verificar si está justificado en allowlist
-      const matchedInAllowlist = allowlistEntries.some(
-        (a) =>
-          normFile === normalizePath(a.file) &&
-          h.pattern === a.category &&
-          h.fingerprint.toLowerCase() === a.fingerprint.toLowerCase()
-      )
-
-      if (matchedInAllowlist) {
-        historyFindingsMatchingAllowlist++
       } else {
+        // En el historial Git, la allowlist NO autoriza hallazgos. Se exige vinculación exacta al baseline.
         unauthorizedFindings.push(h)
       }
     }
   }
 
-  // Registros huérfanos: entradas en baseline que no corresponden a ningún hallazgo del historial
+  // Registros huérfanos en baseline: entradas sin hallazgo real en el historial Git
   const orphanedEntries = []
   for (let i = 0; i < baselineEntries.length; i++) {
     if (runHistoryScan && !matchedBaselineIndices.has(i)) {
       orphanedEntries.push({ index: i, entry: baselineEntries[i] })
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. Auditoría de Allowlist: Directa e Inversa en el Árbol de Trabajo
+  // -------------------------------------------------------------------------
+  const matchedAllowlistIndices = new Set()
+  const unauthorizedWorkingTreeFindings = []
+  const orphanedAllowlistEntries = []
+  let workingTreeFindings = []
+
+  if (runTreeScan) {
+    try {
+      workingTreeFindings = scanWorkingTree({ execFn, readFn })
+    } catch (err) {
+      throw new Error(`Fallo en escaneo del árbol de trabajo (fail-closed): ${err.message}`)
+    }
+
+    // Directa: todo hallazgo del árbol debe satisfacer estrictamente una regla de allowlist
+    for (const f of workingTreeFindings) {
+      const src = parseSource(f.source)
+      const normFile = normalizePath(src.file)
+      let authorized = false
+
+      allowlistEntries.forEach((a, aIdx) => {
+        if (
+          normFile === normalizePath(a.file) &&
+          f.pattern === a.category &&
+          f.fingerprint.toLowerCase() === a.fingerprint.toLowerCase()
+        ) {
+          // Verificación de criterio estricto matchPrefix si está definido
+          if (!a.matchPrefix || (f.raw && f.raw.startsWith(a.matchPrefix))) {
+            matchedAllowlistIndices.add(aIdx)
+            authorized = true
+          }
+        }
+      })
+
+      if (!authorized) {
+        unauthorizedWorkingTreeFindings.push(f)
+      }
+    }
+
+    // Inversa: ninguna entrada de allowlist puede ser huérfana (sin hallazgo activo en el árbol)
+    for (let i = 0; i < allowlistEntries.length; i++) {
+      if (!matchedAllowlistIndices.has(i)) {
+        orphanedAllowlistEntries.push({ index: i, entry: allowlistEntries[i] })
+      }
     }
   }
 
@@ -273,30 +377,37 @@ export function auditBaseline(options = {}) {
     directAuditResults,
     totalHistoryFindings,
     historyFindingsMatchingBaseline,
-    historyFindingsMatchingAllowlist,
     unauthorizedFindings,
     orphanedEntries,
+    totalAllowlistEntries: allowlistEntries.length,
+    totalWorkingTreeFindings: workingTreeFindings.length,
+    unauthorizedWorkingTreeFindings,
+    orphanedAllowlistEntries,
   }
 }
 
 export function runCli() {
   try {
-    console.log('🔍 [AUDITORÍA DE BASELINE] Iniciando auditoría directa e inversa de seguridad...')
+    console.log('🔍 [AUDITORÍA DE BASELINE Y ALLOWLIST] Iniciando auditoría integral directa e inversa...')
     const result = auditBaseline()
 
     console.log('\n================================================================================')
-    console.log('📊 REPORTE CONSOLIDADO DE AUDITORÍA DE BASELINE DE SECRETOS')
+    console.log('📊 REPORTE CONSOLIDADO DE AUDITORÍA DE SEGURIDAD (BASELINE Y ALLOWLIST)')
     console.log('================================================================================')
     console.log(`• Total de entradas en baseline:                ${result.total}`)
     console.log(`• Entradas VERIFIED (secretos históricos reales):  ${result.verified.length}`)
-    console.log(`• Entradas SYNTHETIC (fixtures controlados):       ${result.synthetic.length}`)
+    console.log(`• Entradas SYNTHETIC (fixtures verificados):      ${result.synthetic.length}`)
     console.log(`• Entradas INVALID (fallos de correspondencia):     ${result.invalid.length}`)
-    console.log(`• Registros duplicados:                           ${result.duplicates.length}`)
+    console.log(`• Registros duplicados en baseline:               ${result.duplicates.length}`)
     console.log(`• Registros huérfanos en baseline:                ${result.orphanedEntries.length}`)
     console.log(`• Total de hallazgos en historial Git:             ${result.totalHistoryFindings}`)
-    console.log(`• Hallazgos autorizados por baseline:              ${result.historyFindingsMatchingBaseline}`)
-    console.log(`• Hallazgos autorizados por allowlist:             ${result.historyFindingsMatchingAllowlist}`)
+    console.log(`• Hallazgos históricos autorizados por baseline:   ${result.historyFindingsMatchingBaseline}`)
     console.log(`• Hallazgos históricos no autorizados:             ${result.unauthorizedFindings.length}`)
+    console.log('--------------------------------------------------------------------------------')
+    console.log(`• Total de entradas en allowlist:               ${result.totalAllowlistEntries}`)
+    console.log(`• Total de hallazgos en árbol de trabajo:          ${result.totalWorkingTreeFindings}`)
+    console.log(`• Entradas huérfanas en allowlist:                ${result.orphanedAllowlistEntries.length}`)
+    console.log(`• Hallazgos no autorizados en árbol de trabajo:   ${result.unauthorizedWorkingTreeFindings.length}`)
 
     if (result.duplicates.length > 0) {
       console.error('\n❌ ENTRADAS DUPLICADAS DETECTADAS EN EL BASELINE:')
@@ -315,7 +426,7 @@ export function runCli() {
     }
 
     if (result.orphanedEntries.length > 0) {
-      console.error('\n❌ ENTRADAS HUÉRFANAS DETECTADAS (sin correspondencia en historial Git):')
+      console.error('\n❌ ENTRADAS HUÉRFANAS DETECTADAS EN BASELINE:')
       for (const orph of result.orphanedEntries) {
         console.error(
           `   [Índice ${orph.index}] Commit: ${orph.entry.commit} | Archivo: ${orph.entry.file} | Patrón: ${orph.entry.category}:${orph.entry.fingerprint}`
@@ -332,23 +443,43 @@ export function runCli() {
       }
     }
 
+    if (result.orphanedAllowlistEntries.length > 0) {
+      console.error('\n❌ ENTRADAS HUÉRFANAS DETECTADAS EN ALLOWLIST (sin hallazgo activo en árbol de trabajo):')
+      for (const orphA of result.orphanedAllowlistEntries) {
+        console.error(
+          `   [Índice ${orphA.index}] Archivo: ${orphA.entry.file} | Patrón: ${orphA.entry.category}:${orphA.entry.fingerprint} -> ${orphA.entry.reason}`
+        )
+      }
+    }
+
+    if (result.unauthorizedWorkingTreeFindings.length > 0) {
+      console.error('\n❌ HALLAZGOS NO AUTORIZADOS EN ÁRBOL DE TRABAJO:')
+      for (const unauthTree of result.unauthorizedWorkingTreeFindings) {
+        console.error(
+          `   Archivo: ${unauthTree.source}:${unauthTree.line} | Patrón: ${unauthTree.pattern} | Huella: ${unauthTree.fingerprint} | Vista previa: ${mask(unauthTree.preview)}`
+        )
+      }
+    }
+
     const hasErrors =
       result.invalid.length > 0 ||
       result.duplicates.length > 0 ||
       result.orphanedEntries.length > 0 ||
-      result.unauthorizedFindings.length > 0
+      result.unauthorizedFindings.length > 0 ||
+      result.orphanedAllowlistEntries.length > 0 ||
+      result.unauthorizedWorkingTreeFindings.length > 0
 
     if (hasErrors) {
-      console.error('\n❌ RESULTADO FINAL: AUDITORÍA DE BASELINE RECHAZADA (FAIL-CLOSED).')
+      console.error('\n❌ RESULTADO FINAL: AUDITORÍA DE SEGURIDAD RECHAZADA (FAIL-CLOSED).')
       process.exit(1)
     }
 
     console.log('\n================================================================================')
-    console.log('✅ RESULTADO FINAL: AUDITORÍA DE BASELINE 100% SATISFACTORIA (APROBADO)')
+    console.log('✅ RESULTADO FINAL: AUDITORÍA DE SEGURIDAD 100% SATISFACTORIA (APROBADO)')
     console.log('================================================================================')
     process.exit(0)
   } catch (err) {
-    console.error(`\n❌ ERROR EN AUDITORÍA DE BASELINE (FAIL-CLOSED): ${err.message}`)
+    console.error(`\n❌ ERROR EN AUDITORÍA DE SEGURIDAD (FAIL-CLOSED): ${err.message}`)
     process.exit(1)
   }
 }

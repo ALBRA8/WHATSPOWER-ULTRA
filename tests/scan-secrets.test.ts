@@ -19,7 +19,7 @@ import {
   type AllowlistEntry,
   type BaselineEntry,
 } from '../scripts/scan-secrets.mjs'
-import { auditBaseline } from '../scripts/audit-baseline.mjs'
+import { auditBaseline, verifySyntheticEvidence } from '../scripts/audit-baseline.mjs'
 
 const SHA_VALID_A = '11223344556677889900aabbccddeeff00112233'
 const SHA_VALID_B = '1122334499887766554433221100ffeeddccbbaa' // comparte los primeros 8 chars con A
@@ -439,12 +439,12 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
   // -------------------------------------------------------------------------
   // AUDIT-01 a AUDIT-13: Auditoría integral directa e inversa del baseline
   // -------------------------------------------------------------------------
-  it('AUDIT-01: Auditoría directa real del baseline verifica que las 54 entradas son íntegras y válidas', () => {
-    const result = auditBaseline({ scanHistory: false })
-    assert.strictEqual(result.total, 54)
+  it('AUDIT-01: Auditoría directa real del baseline verifica que las 59 entradas son íntegras y válidas', () => {
+    const result = auditBaseline({ scanHistory: false, scanWorkingTree: false })
+    assert.strictEqual(result.total, 59)
     assert.strictEqual(result.invalid.length, 0, 'No debe haber entradas INVALID en el baseline real')
     assert.strictEqual(result.duplicates.length, 0, 'No debe haber entradas duplicadas en el baseline')
-    assert.strictEqual(result.synthetic.length, 54, 'Todas las entradas de prueba deben estar identificadas como SYNTHETIC')
+    assert.strictEqual(result.synthetic.length, 59, 'Todas las entradas de prueba deben estar identificadas como SYNTHETIC')
   })
 
   it('AUDIT-02: SHA inexistente en commit es detectado y clasificado como INVALID', () => {
@@ -558,6 +558,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     const result = auditBaseline({
       execFn: fakeExec,
       baselineEntries: fakeBaseline,
+      scanWorkingTree: false,
     })
     assert.strictEqual(result.orphanedEntries.length, 1)
   })
@@ -575,6 +576,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     const result = auditBaseline({
       execFn: fakeExec,
       baselineEntries: [],
+      scanWorkingTree: false,
     })
     assert.strictEqual(result.unauthorizedFindings.length, 1)
   })
@@ -585,6 +587,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     assert.ok(entry, 'Debe existir al menos un fixture en tests/')
     const result = auditBaseline({
       scanHistory: false,
+      scanWorkingTree: false,
       baselineEntries: [entry],
     })
     assert.strictEqual(result.synthetic.length, 1)
@@ -627,6 +630,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     const result = auditBaseline({
       execFn: fakeExec,
       baselineEntries: baseline,
+      scanWorkingTree: false,
     })
     assert.strictEqual(result.unauthorizedFindings.length, 1)
     assert.strictEqual(result.orphanedEntries.length, 1)
@@ -637,6 +641,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
       () =>
         auditBaseline({
           readFn: () => 'corrupted-json-not-valid{',
+          scanWorkingTree: false,
         }),
       /JSON de baseline corrupto o inválido/
     )
@@ -669,10 +674,196 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     const result = auditBaseline({
       execFn: fakeExec,
       baselineEntries: baseline,
+      scanWorkingTree: false,
     })
 
     assert.strictEqual(result.unauthorizedFindings.length, 0)
     assert.strictEqual(result.orphanedEntries.length, 0)
     assert.strictEqual(result.historyFindingsMatchingBaseline, 1)
+  })
+
+  it('AUDIT-14 (FAIL-CLOSED-01): Allowlist inexistente lanza excepción fail-closed (no continúa en silencio)', () => {
+    assert.throws(
+      () =>
+        auditBaseline({
+          allowlistPath: 'scripts/security/non_existent_allowlist.json',
+          scanHistory: false,
+          scanWorkingTree: false,
+        }),
+      /Archivo allowlist no encontrado.*fail-closed/
+    )
+  })
+
+  it('AUDIT-15 (FAIL-CLOSED-02): Allowlist con JSON corrupto o inválido lanza excepción fail-closed', () => {
+    assert.throws(
+      () =>
+        auditBaseline({
+          readFn: (p) => {
+            if (p.includes('allowlist')) return '{ corrupt json: true '
+            return '[]'
+          },
+          scanHistory: false,
+          scanWorkingTree: false,
+        }),
+      /JSON de allowlist corrupto o inválido.*fail-closed/
+    )
+  })
+
+  it('AUDIT-16 (SYNTHETIC-01): Fixture en tests/ sin evidencia sintética demostrable es RECHAZADO (INVALID, nunca SYNTHETIC)', () => {
+    const fakeCommit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+    const realLookingKey = 'live_prod_api_key_no_markers_12345678'
+    const fp = computeFingerprint(realLookingKey)
+    const fakeBaseline = [
+      {
+        commit: fakeCommit,
+        file: 'tests/production-leak.test.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: fp,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('git show') && cmd.includes(':')) {
+        return `export const config = { secret: "${realLookingKey}" };\n`
+      }
+      return ''
+    }
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: fakeBaseline,
+      scanHistory: false,
+      scanWorkingTree: false,
+    })
+
+    assert.strictEqual(result.synthetic.length, 0, 'No debe clasificarse como SYNTHETIC sin evidencia')
+    assert.strictEqual(result.invalid.length, 1, 'Debe clasificarse como INVALID')
+    assert.match(result.invalid[0].reason, /sin evidencia verificable/)
+  })
+
+  it('AUDIT-17 (SYNTHETIC-02): verifySyntheticEvidence valida token sintético Y contexto de pruebas', () => {
+    const validEntry = { status: 'synthetic-test-fixture', file: 'tests/foo.ts' }
+    const sampleToken = ['EAAG', 'dummy_test_token_123456'].join('_')
+    const validBlob = `describe('test suite', () => { it('works', () => { const dummyToken = '${sampleToken}'; }); });`
+    const validFindings = [{ raw: sampleToken, preview: 'EAAG…(28 caracteres)', line: 1 }]
+    assert.strictEqual(verifySyntheticEvidence(validEntry, validBlob, validFindings), true)
+
+    // Falso si falta contexto de pruebas
+    const noTestBlob = `const secret = '${sampleToken}';`
+    assert.strictEqual(verifySyntheticEvidence(validEntry, noTestBlob, validFindings), false)
+
+    // Falso si el status no es synthetic-test-fixture
+    const wrongStatusEntry = { status: 'revoked-and-rotated', file: 'tests/foo.ts' }
+    assert.strictEqual(verifySyntheticEvidence(wrongStatusEntry, validBlob, validFindings), false)
+  })
+
+  it('AUDIT-18 (ALLOWLIST-INV-01): Entrada huérfana en allowlist (sin hallazgo en árbol de trabajo) es detectada', () => {
+    const fakeAllowlist = [
+      {
+        file: 'tests/non-existent-secret-file.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: '112233445566',
+        matchPrefix: 'dummy_prefix',
+        synthetic: true,
+        reason: 'Excepción de prueba para regla huérfana',
+      },
+    ]
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('ls-files')) return 'tests/foo.ts\n'
+      return ''
+    }
+    const fakeRead = () => 'export const cleanCode = 1;\n'
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      readFn: fakeRead,
+      allowlistEntries: fakeAllowlist,
+      baselineEntries: [],
+      scanHistory: false,
+      scanWorkingTree: true,
+    })
+
+    assert.strictEqual(result.orphanedAllowlistEntries.length, 1)
+    assert.strictEqual(result.orphanedAllowlistEntries[0].entry.file, 'tests/non-existent-secret-file.ts')
+  })
+
+  it('AUDIT-19 (ALLOWLIST-HIST-01): Allowlist NO autoriza hallazgos en el historial Git (exige baseline)', () => {
+    const histToken = ['EAAG', 'historicalTokenNotInBaseline1234'].join('')
+    const fp = computeFingerprint(histToken)
+    const commitSHA = '9999999999999999999999999999999999999999'
+
+    const allowlist = [
+      {
+        file: 'tests/historical-leak.test.ts',
+        category: 'META_TOKEN',
+        fingerprint: fp,
+        reason: 'Intento indebido de autorizar historial con allowlist',
+      },
+    ]
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('rev-list')) return commitSHA
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('cat-file -e')) return ''
+      if (cmd.includes('git show') && cmd.includes('--name-only')) return 'tests/historical-leak.test.ts\n'
+      if (cmd.includes('git show')) return `const token = "${histToken}";\n`
+      return ''
+    }
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: [],
+      allowlistEntries: allowlist,
+      scanHistory: true,
+      scanWorkingTree: false,
+    })
+
+    assert.strictEqual(result.unauthorizedFindings.length, 1)
+    assert.strictEqual(result.historyFindingsMatchingBaseline, 0)
+  })
+
+  it('AUDIT-20 (ALLOWLIST-PREFIX-01): Hallazgo que no cumple matchPrefix en allowlist es rechazado en filterAllowlist', () => {
+    const allowlist = [
+      {
+        file: 'tests/contracts.test.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: '112233445566',
+        matchPrefix: 'test_internal_secret_',
+        synthetic: true,
+        reason: 'Requiere prefijo sintético estricto',
+      },
+    ]
+
+    const findingMismatch: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: 'tests/contracts.test.ts',
+      line: 10,
+      preview: 'prod…(20 caracteres)',
+      fingerprint: '112233445566',
+      raw: 'production_token_1234567890',
+    }
+
+    const { kept, excluded } = filterAllowlist([findingMismatch], allowlist)
+    assert.strictEqual(kept.length, 1, 'Debe mantenerse como violación activa')
+    assert.strictEqual(excluded.length, 0, 'No debe ser autorizado')
+
+    const findingMatch: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: 'tests/contracts.test.ts',
+      line: 10,
+      preview: 'test…(20 caracteres)',
+      fingerprint: '112233445566',
+      raw: 'test_internal_secret_daemon_1234',
+    }
+
+    const res = filterAllowlist([findingMatch], allowlist)
+    assert.strictEqual(res.kept.length, 0)
+    assert.strictEqual(res.excluded.length, 1)
   })
 })

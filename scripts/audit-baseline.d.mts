@@ -7,10 +7,15 @@ export interface AuditResult {
   directAuditResults: any[]
   totalHistoryFindings: number
   historyFindingsMatchingBaseline: number
-  historyFindingsMatchingAllowlist: number
   unauthorizedFindings: any[]
   orphanedEntries: any[]
+  totalAllowlistEntries: number
+  totalWorkingTreeFindings: number
+  unauthorizedWorkingTreeFindings: any[]
+  orphanedAllowlistEntries: any[]
 }
+
+export function verifySyntheticEvidence(entry: any, blobContent: string, detectedFindings: any[]): boolean
 
 export function auditBaseline(options?: {
   execFn?: (cmd: string, opt?: any) => string
@@ -20,6 +25,7 @@ export function auditBaseline(options?: {
   baselineEntries?: any[]
   allowlistEntries?: any[]
   scanHistory?: boolean
+  scanWorkingTree?: boolean
 }): AuditResult
 
 export function runCli(): void

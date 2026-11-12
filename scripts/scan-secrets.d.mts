@@ -11,6 +11,7 @@ export interface SecretFinding {
   line: number
   preview: string
   fingerprint: string
+  raw?: string
 }
 
 export interface AllowlistEntry {
@@ -18,6 +19,8 @@ export interface AllowlistEntry {
   category: string
   fingerprint: string
   reason: string
+  matchPrefix?: string
+  synthetic?: boolean
 }
 
 export interface BaselineEntry {
