@@ -15,6 +15,8 @@ export interface SecretFinding {
 
 export const ALLOW_MARK: string
 export const PATTERNS: SecretPattern[]
+export function shouldSkipFile(filePath: string): boolean
+export function parseSource(source: string): { isHistory: boolean; commit: string; file: string }
 export function mask(value: string): string
 export function computeFingerprint(value: string): string
 export function scanText(text: string, source?: string): SecretFinding[]

@@ -10,6 +10,7 @@ import { LocalSuppressionStore, CompositeSuppressionChecker, FatigueManager } fr
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { MockDispatcher } from '../src/adapters/dispatcher.ts'
 import { issueStudioSession, resolveStudioSession, parseAdminKeys } from '../src/security.ts'
+import { resetOrgCredentialCache } from '../src/org-credentials.ts'
 import { renderCampaignStudioHtml } from '../src/studio/campaign-studio-html.ts'
 import { renderSpintax } from '../src/engine/spintax.ts'
 
@@ -42,6 +43,7 @@ test('U3-01: Http2ALockChecker envía X-Org-Id + credencial DE LA ORG y valida e
   const CRED_A = 'org_alpha_cred_tercera_reparacion_001'
   const CRED_B = 'org_beta_cred_tercera_reparacion_0002'
   process.env.WHATSPOWER_ORG_CREDENTIALS = `org_alpha:${CRED_A},org_beta:${CRED_B}`
+  resetOrgCredentialCache()
   delete process.env.INTERNAL_API_SECRET
   try {
     const checker = new Http2ALockChecker({ baseUrl: 'http://localhost:3910', timeoutMs: 800 })
@@ -57,6 +59,7 @@ test('U3-01: Http2ALockChecker envía X-Org-Id + credencial DE LA ORG y valida e
   } finally {
     stub.close()
     delete process.env.WHATSPOWER_ORG_CREDENTIALS
+    resetOrgCredentialCache()
   }
 })
 

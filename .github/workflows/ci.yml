@@ -16,12 +16,12 @@ jobs:
         with:
           node-version: 24
       - name: Instalar dependencias
-        run: npm ci || npm install
+        run: npm ci
       - name: TypeScript & Static Check (fail-fast)
         run: npm run tsc
       - name: Lint
         run: npm run lint
-      - name: Build
+      - name: Build (compilación de producción hacia dist/)
         run: npm run build
       - name: Auditoría de dependencias (npm audit)
         run: npm run audit
@@ -29,9 +29,8 @@ jobs:
         run: npm run security:scan
       - name: Escáner de secretos en historial Git
         run: npm run security:scan:history
-      - name: Suite completa de pruebas (incluye AUTH, ORG, OWN, WH, TR, ENV y circuito de bajas)
+      - name: Suite completa de pruebas (incluye AUTH, ORG, OWN, WH, TR, ENV, circuito de bajas y autenticación real)
         run: npm test
         env:
           NODE_ENV: test
-          # Clave administrativa de fallback para evitar fail-closed 503 en tests unitarios generales
           ADMIN_API_KEYS: ci-only-ultra-admin-key-0000000000:org_ci

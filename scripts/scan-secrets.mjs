@@ -56,8 +56,6 @@ export function shouldSkipFile(filePath) {
   const normalized = filePath.replace(/\\/g, '/')
   if (SKIP_FILE_EXTENSIONS.test(normalized)) return true
   if (SKIP_FILENAMES.has(normalized)) return true
-  // Las bases de datos de allowlist y baseline del escáner no se auto-escanean
-  if (normalized.startsWith('scripts/security/')) return true
   return false
 }
 
@@ -134,16 +132,28 @@ export function filterAllowlist(findings, allowlistPath) {
   return { kept, excluded }
 }
 
+export function parseSource(source) {
+  const m = source.match(/^commit\s+([0-9a-fA-F]+)\s+\((.+)\)$/)
+  if (m) {
+    return { isHistory: true, commit: m[1].toLowerCase(), file: m[2].replace(/\\/g, '/') }
+  }
+  return { isHistory: false, commit: '', file: source.replace(/\\/g, '/') }
+}
+
 export function filterBaseline(findings, baselinePath) {
   const baseline = loadJsonList(baselinePath)
   const known = []
   const isNew = []
 
   for (const f of findings) {
+    const src = parseSource(f.source)
     const match = baseline.find(
       (b) =>
         b.category === f.pattern &&
-        b.fingerprint === f.fingerprint
+        b.fingerprint === f.fingerprint &&
+        src.commit &&
+        src.commit.startsWith(b.commit.toLowerCase()) &&
+        (src.file === b.file.replace(/\\/g, '/') || src.file.endsWith('/' + b.file.replace(/\\/g, '/')))
     )
     if (match) known.push({ ...f, status: match.status, rotation: match.rotation })
     else isNew.push(f)
