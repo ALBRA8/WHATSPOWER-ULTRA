@@ -108,3 +108,8 @@ process.on('uncaughtException', (err) => {
   console.error('[worker 2B] excepción no capturada (parada de emergencia):', err.message)
   void gracefulShutdown('uncaughtException')
 })
+process.on('unhandledRejection', (reason) => {
+  // (A5-08) Una rejection suelta NO tumba el worker (los ticks capturan sus
+  // propios errores); se loguea para observabilidad sin perder el bucle.
+  console.error('[worker 2B] unhandledRejection:', reason instanceof Error ? reason.message : reason)
+})

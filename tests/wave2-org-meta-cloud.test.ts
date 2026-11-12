@@ -101,7 +101,7 @@ describe('despacho de campañas con credenciales por organización (puntos 6 y 7
 
 describe('aislamiento y fail-closed (puntos 8 y 9)', () => {
   it('sin organizationId → ORG_REQUIRED (jamás org implícita)', async () => {
-    const captured: Array<{ auth: string }> = []
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
     const dispatcher = new MetaCloudDispatcher({ registry: dualOrgRegistry(), fetchImpl: graphStub(captured), allowRealDispatch: true })
     const r = await dispatcher.dispatch('573001111111', 'x')
     assert.equal(r.success, false)
@@ -110,7 +110,7 @@ describe('aislamiento y fail-closed (puntos 8 y 9)', () => {
   })
 
   it('org sin conexión propia → NO_CONNECTED_NUMBER; org-b sigue operativa (punto 9)', async () => {
-    const captured: Array<{ auth: string; phoneId: string }> = []
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
     // solo org-b tiene conexión; org-a quedó sin conexión (revocada)
     const registry = new OrgWaCredentialRegistry([new EnvOrgWaSource({
       metaOrgNumbers: 'org-b:222000222',
@@ -127,7 +127,7 @@ describe('aislamiento y fail-closed (puntos 8 y 9)', () => {
   })
 
   it('org con conexión pero SIN credencial → CREDENTIAL_UNAVAILABLE (fail-closed)', async () => {
-    const captured: Array<{ auth: string }> = []
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
     const registry = new OrgWaCredentialRegistry([new EnvOrgWaSource({
       metaOrgNumbers: 'org-a:111000111',
       metaOrgCredentials: '', // la conexión existe, la credencial se revocó
@@ -140,7 +140,7 @@ describe('aislamiento y fail-closed (puntos 8 y 9)', () => {
   })
 
   it('org desconocida jamás recibe el número ni el token de otra org (sin filtración)', async () => {
-    const captured: Array<{ auth: string }> = []
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
     const dispatcher = new MetaCloudDispatcher({ registry: dualOrgRegistry(), fetchImpl: graphStub(captured), allowRealDispatch: true })
     const r = await dispatcher.dispatch('573003333333', 'x', 'org-invitada')
     assert.equal(r.success, false)
@@ -151,7 +151,7 @@ describe('aislamiento y fail-closed (puntos 8 y 9)', () => {
   })
 
   it('salvaguarda física: ALLOW_REAL_DISPATCH=false bloquea ANTES de cualquier resolución', async () => {
-    const captured: Array<{ auth: string }> = []
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
     const dispatcher = new MetaCloudDispatcher({ registry: dualOrgRegistry(), fetchImpl: graphStub(captured), allowRealDispatch: false })
     const r = await dispatcher.dispatch('573001111111', 'x', 'org-a')
     assert.equal(r.success, false)
@@ -257,5 +257,40 @@ describe('fuente compuesta (env + CRM) con verificación cruzada', () => {
     assert.equal(cred!.accessToken, 'token-ORG-A-0123456789abcdef')
     const cross = await registry.resolveCredential('org-b', '111000111')
     assert.equal(cross, null)
+  })
+})
+
+// ============================================================
+// (Auditoría A1-01, 2026-11-11) Clasificación B2 en ULTRA:
+// timeout/5xx → RESULTADO INCIERTO (jamás reenvío a ciegas);
+// solo rechazables (400/401/403/...) son fallo confirmado.
+// Espejo del contrato §7 que WHATSPOWER ya cumplía.
+// ============================================================
+describe('A1-01: clasificación de incertidumbre en MetaCloudDispatcher', () => {
+  it('HTTP 500 de Graph → uncertain:true (el mensaje pudo haberse aceptado)', async () => {
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
+    const dispatcher = new MetaCloudDispatcher({ registry: dualOrgRegistry(), fetchImpl: graphStub(captured, 500), allowRealDispatch: true })
+    const r = await dispatcher.dispatch('573001111111', 'x', 'org-a')
+    assert.equal(r.success, false)
+    assert.equal(r.uncertain, true, '5xx DEBE clasificarse como resultado incierto')
+    assert.match(r.error!, /ambiguo/)
+  })
+
+  it('HTTP 400 de Graph → fallo CONFIRMADO sin uncertain (rechazo real)', async () => {
+    const captured: Array<{ auth: string; phoneId: string; to: string }> = []
+    const dispatcher = new MetaCloudDispatcher({ registry: dualOrgRegistry(), fetchImpl: graphStub(captured, 400), allowRealDispatch: true })
+    const r = await dispatcher.dispatch('573001111111', 'x', 'org-a')
+    assert.equal(r.success, false)
+    assert.notEqual(r.uncertain, true)
+    assert.match(r.error!, /META_CLOUD_API_HTTP_400/)
+  })
+
+  it('timeout / conexión cortada → uncertain:true (B2)', async () => {
+    const throwing: typeof fetch = (async () => { throw new Error('The operation was aborted due to timeout') }) as unknown as typeof fetch
+    const dispatcher = new MetaCloudDispatcher({ registry: dualOrgRegistry(), fetchImpl: throwing, allowRealDispatch: true })
+    const r = await dispatcher.dispatch('573001111111', 'x', 'org-a')
+    assert.equal(r.success, false)
+    assert.equal(r.uncertain, true)
+    assert.match(r.error!, /META_CLOUD_NETWORK_ERROR/)
   })
 })
