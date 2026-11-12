@@ -149,6 +149,8 @@ async function runBajasCircuitTest() {
     }).catch(() => {})
     console.log('  🧹 Registro de prueba eliminado de Capa 2A.')
     await server2A.close()
+    delete process.env.WHATSPOWER_ORG_CREDENTIALS
+    resetOrgCredentialCache()
   }
 
   console.log('\n============================================================')

@@ -581,7 +581,7 @@ describe('TR: salvaguardas de despacho real en TODOS los adaptadores', () => {
     const origFetch = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       fetchCalled++
-      sentAuth = (init?.headers as Record<string, string>)['Authorization']
+      sentAuth = ((init?.headers || {}) as Record<string, string>)['Authorization']
       sentPhoneId = String(input).match(/graph\.facebook\.com\/v[\d.]+\/(\d+)\/messages/)![1]
       return new Response(JSON.stringify({ messages: [{ id: 'wamid_test' }] }), { status: 200 })
     }) as any

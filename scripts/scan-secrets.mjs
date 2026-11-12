@@ -5,17 +5,19 @@
  * Detecta patrones de tokens y credenciales sensibles en archivos tracked por Git
  * y opcionalmente en el historial completo de commits (--history).
  *
- * Correcciones de seguridad aplicadas:
- *   - Cero falsos negativos por 'lastIndex': patrones sin bandera 'g' en .test() o
- *     instanciación limpia e idempotente por línea.
- *   - No se excluyen carpetas completas de tests ni documentación sin justificar.
- *   - Se enmascaran todas las credenciales encontradas (nunca se imprimen completas en logs).
- *   - Soporte para allowlist documentada y marcador de línea 'scan-secrets:allow'.
- *   - Soporte para escaneo de historial Git con baseline para commits históricos.
+ * Controles de seguridad certificados:
+ *   - Idempotencia estricta: expresiones regulares sin bandera 'g' en .test()/.exec().
+ *   - Sin exclusiones de carpetas globales: allowlist y baseline se auditan activamente.
+ *   - Enmascaramiento completo en logs (jamás se imprime un secreto en claro).
+ *   - Validación de integridad estricta en allowlist y baseline (formato, tipos, hashes).
+ *   - Coincidencia de ruta exacta normalizada (prohibido suffix matching / endsWith).
+ *   - Excepciones históricas ligadas a la cuádrupla (commit exacto, archivo exacto, categoría, huella).
+ *   - Comportamiento fail-closed: cualquier fallo de Git, JSON inválido o lectura inaccesible
+ *     aborta el proceso con código de salida distinto de cero (código 1).
  */
 import { execSync } from 'node:child_process'
-import { readFileSync, existsSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
 export const ALLOW_MARK = 'scan-secrets:allow'
@@ -52,8 +54,13 @@ const DUMMY_HINTS = [
 const SKIP_FILE_EXTENSIONS = /\.(png|jpe?g|gif|webp|pdf|zip|gz|ico|woff2?|ttf|db|sqlite3?|lock)$/i
 const SKIP_FILENAMES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'])
 
+export function normalizePath(filePath) {
+  if (typeof filePath !== 'string') return ''
+  return filePath.replace(/\\/g, '/').replace(/^\.\//, '').trim()
+}
+
 export function shouldSkipFile(filePath) {
-  const normalized = filePath.replace(/\\/g, '/')
+  const normalized = normalizePath(filePath)
   if (SKIP_FILE_EXTENSIONS.test(normalized)) return true
   if (SKIP_FILENAMES.has(normalized)) return true
   return false
@@ -82,7 +89,6 @@ export function scanText(text, source = 'inline') {
     if (line.includes(ALLOW_MARK)) return
 
     for (const pattern of PATTERNS) {
-      // Uso de patrón sin 'g': .exec() y .test() no sufren de estado interno mutable
       const match = pattern.re.exec(line)
       if (match) {
         const raw = (match[1] || match[0]).trim()
@@ -92,7 +98,7 @@ export function scanText(text, source = 'inline') {
         findings.push({
           pattern: pattern.id,
           desc: pattern.desc,
-          source,
+          source: normalizePath(source),
           line: lineNo,
           preview: mask(raw),
           fingerprint,
@@ -104,26 +110,84 @@ export function scanText(text, source = 'inline') {
   return findings
 }
 
-export function loadJsonList(filePath) {
-  try {
-    if (existsSync(filePath)) {
-      return JSON.parse(readFileSync(filePath, 'utf8'))
+export function validateAllowlist(entries) {
+  if (!Array.isArray(entries)) {
+    throw new Error('Allowlist inválida: el contenido raíz debe ser un array JSON')
+  }
+  const validCategories = new Set(PATTERNS.map((p) => p.id))
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]
+    if (!e || typeof e !== 'object') {
+      throw new Error(`Allowlist entrada #${i} inválida: debe ser un objeto JSON`)
     }
-  } catch {}
-  return []
+    if (typeof e.file !== 'string' || !e.file.trim() || e.file === '*' || e.file.includes('*')) {
+      throw new Error(`Allowlist entrada #${i} inválida: 'file' debe ser una ruta específica y no comodín ('*')`)
+    }
+    if (typeof e.category !== 'string' || !validCategories.has(e.category)) {
+      throw new Error(`Allowlist entrada #${i} inválida: categoría desconocida '${e.category}'`)
+    }
+    if (typeof e.fingerprint !== 'string' || !/^[0-9a-f]{12}$/i.test(e.fingerprint)) {
+      throw new Error(`Allowlist entrada #${i} inválida: huella sha256 inválida '${e.fingerprint}' (debe tener 12 hex)`)
+    }
+    if (typeof e.reason !== 'string' || !e.reason.trim()) {
+      throw new Error(`Allowlist entrada #${i} inválida: 'reason' es obligatoria y debe justificar la excepción`)
+    }
+  }
+  return true
 }
 
-export function filterAllowlist(findings, allowlistPath) {
-  const allowlist = loadJsonList(allowlistPath)
+export function validateBaseline(entries) {
+  if (!Array.isArray(entries)) {
+    throw new Error('Baseline inválido: el contenido raíz debe ser un array JSON')
+  }
+  const validCategories = new Set(PATTERNS.map((p) => p.id))
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]
+    if (!e || typeof e !== 'object') {
+      throw new Error(`Baseline entrada #${i} inválida: debe ser un objeto JSON`)
+    }
+    if (typeof e.commit !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(e.commit)) {
+      throw new Error(`Baseline entrada #${i} inválida: 'commit' debe ser un hash Git válido (≥7 hex)`)
+    }
+    if (typeof e.file !== 'string' || !e.file.trim() || e.file.includes('*')) {
+      throw new Error(`Baseline entrada #${i} inválida: 'file' debe ser una ruta de archivo específica`)
+    }
+    if (typeof e.category !== 'string' || !validCategories.has(e.category)) {
+      throw new Error(`Baseline entrada #${i} inválida: categoría desconocida '${e.category}'`)
+    }
+    if (typeof e.fingerprint !== 'string' || !/^[0-9a-f]{12}$/i.test(e.fingerprint)) {
+      throw new Error(`Baseline entrada #${i} inválida: huella sha256 inválida '${e.fingerprint}'`)
+    }
+  }
+  return true
+}
+
+export function loadJsonList(filePath, required = true) {
+  if (!existsSync(filePath)) {
+    if (required) throw new Error(`Archivo de seguridad no encontrado: ${filePath} (fail-closed)`)
+    return []
+  }
+  try {
+    const content = readFileSync(filePath, 'utf8')
+    return JSON.parse(content)
+  } catch (err) {
+    throw new Error(`Error al leer o parsear JSON en ${filePath} (fail-closed): ${err.message}`)
+  }
+}
+
+export function filterAllowlist(findings, allowlistOrPath) {
+  const entries = Array.isArray(allowlistOrPath) ? allowlistOrPath : loadJsonList(allowlistOrPath)
+  validateAllowlist(entries)
   const kept = []
   const excluded = []
 
   for (const f of findings) {
-    const match = allowlist.find(
+    const normSource = normalizePath(f.source)
+    const match = entries.find(
       (a) =>
         a.category === f.pattern &&
-        a.fingerprint === f.fingerprint &&
-        (f.source.replace(/\\/g, '/').endsWith(a.file.replace(/\\/g, '/')) || a.file === '*')
+        a.fingerprint.toLowerCase() === f.fingerprint.toLowerCase() &&
+        normSource === normalizePath(a.file)
     )
     if (match) excluded.push({ ...f, reason: match.reason })
     else kept.push(f)
@@ -135,25 +199,30 @@ export function filterAllowlist(findings, allowlistPath) {
 export function parseSource(source) {
   const m = source.match(/^commit\s+([0-9a-fA-F]+)\s+\((.+)\)$/)
   if (m) {
-    return { isHistory: true, commit: m[1].toLowerCase(), file: m[2].replace(/\\/g, '/') }
+    return { isHistory: true, commit: m[1].toLowerCase(), file: normalizePath(m[2]) }
   }
-  return { isHistory: false, commit: '', file: source.replace(/\\/g, '/') }
+  return { isHistory: false, commit: '', file: normalizePath(source) }
 }
 
-export function filterBaseline(findings, baselinePath) {
-  const baseline = loadJsonList(baselinePath)
+export function filterBaseline(findings, baselineOrPath) {
+  const entries = Array.isArray(baselineOrPath) ? baselineOrPath : loadJsonList(baselineOrPath)
+  validateBaseline(entries)
   const known = []
   const isNew = []
 
   for (const f of findings) {
     const src = parseSource(f.source)
-    const match = baseline.find(
+    if (!src.isHistory || !src.commit) {
+      isNew.push(f)
+      continue
+    }
+    const normFile = normalizePath(src.file)
+    const match = entries.find(
       (b) =>
         b.category === f.pattern &&
-        b.fingerprint === f.fingerprint &&
-        src.commit &&
-        src.commit === b.commit.toLowerCase() &&
-        src.file === b.file.replace(/\\/g, '/')
+        b.fingerprint.toLowerCase() === f.fingerprint.toLowerCase() &&
+        (src.commit === b.commit.toLowerCase() || (src.commit.startsWith(b.commit.toLowerCase()) && b.commit.length >= 7)) &&
+        normFile === normalizePath(b.file)
     )
     if (match) known.push({ ...f, status: match.status, rotation: match.rotation })
     else isNew.push(f)
@@ -162,121 +231,141 @@ export function filterBaseline(findings, baselinePath) {
   return { known, isNew }
 }
 
-export function scanWorkingTree() {
+export function scanWorkingTree(options = {}) {
+  const execFn = options.execFn || execSync
+  const readFn = options.readFn || readFileSync
   let files = []
   try {
-    files = execSync('git ls-files', { encoding: 'utf8' })
+    files = execFn('git ls-files', { encoding: 'utf8' })
       .split('\n')
       .map((f) => f.trim())
       .filter(Boolean)
-  } catch {
-    return []
+  } catch (err) {
+    throw new Error(`Fallo de Git al listar archivos rastreados (fail-closed): ${err.message}`)
   }
 
   const findings = []
   for (const file of files) {
     if (shouldSkipFile(file)) continue
-    if (!existsSync(file)) continue
+    const normFile = normalizePath(file)
     try {
-      const content = readFileSync(file, 'utf8')
-      findings.push(...scanText(content, file))
-    } catch {}
+      const content = readFn(file, 'utf8')
+      findings.push(...scanText(content, normFile))
+    } catch (err) {
+      throw new Error(`No se pudo leer el archivo rastreado ${file} (fail-closed): ${err.message}`)
+    }
   }
 
   return findings
 }
 
-export function scanGitHistory() {
+export function scanGitHistory(options = {}) {
+  const execFn = options.execFn || execSync
   const findings = []
   let commits = []
   try {
-    commits = execSync('git rev-list --all', { encoding: 'utf8' })
+    commits = execFn('git rev-list --all', { encoding: 'utf8' })
       .split('\n')
       .map((c) => c.trim())
       .filter(Boolean)
-  } catch {
-    return []
+  } catch (err) {
+    throw new Error(`Fallo de Git al obtener historial de commits (fail-closed): ${err.message}`)
+  }
+
+  if (commits.length === 0) {
+    throw new Error('Historial Git vacío o incompleto (shallow clone sin historial) — escaneo incompleto (fail-closed)')
   }
 
   console.log(`Auditoría de historial Git: escaneando ${commits.length} commits...`)
   const scannedBlobs = new Set()
 
   for (const commit of commits) {
+    let files = []
     try {
-      const files = execSync(`git show ${commit} --format= --name-only --diff-filter=AM`, {
+      files = execFn(`git show ${commit} --format= --name-only --diff-filter=AM`, {
         encoding: 'utf8',
         maxBuffer: 32 * 1024 * 1024,
       })
         .split('\n')
         .map((f) => f.trim())
         .filter(Boolean)
+    } catch (err) {
+      throw new Error(`Error de Git al inspeccionar commit ${commit} (fail-closed): ${err.message}`)
+    }
 
-      for (const file of files) {
-        if (shouldSkipFile(file)) continue
-        const blobKey = `${commit.slice(0, 8)}:${file}`
-        if (scannedBlobs.has(blobKey)) continue
-        scannedBlobs.add(blobKey)
+    for (const file of files) {
+      if (shouldSkipFile(file)) continue
+      const normFile = normalizePath(file)
+      const blobKey = `${commit.slice(0, 8)}:${normFile}`
+      if (scannedBlobs.has(blobKey)) continue
+      scannedBlobs.add(blobKey)
 
-        try {
-          const blob = execSync(`git show ${commit}:${JSON.stringify(file)}`, {
-            encoding: 'utf8',
-            maxBuffer: 32 * 1024 * 1024,
-          })
-          findings.push(...scanText(blob, `commit ${commit.slice(0, 8)} (${file})`))
-        } catch {}
+      try {
+        const blob = execFn(`git show ${commit}:${JSON.stringify(file)}`, {
+          encoding: 'utf8',
+          maxBuffer: 32 * 1024 * 1024,
+        })
+        findings.push(...scanText(blob, `commit ${commit.slice(0, 8)} (${normFile})`))
+      } catch (err) {
+        throw new Error(`Error al leer blob de Git para ${commit}:${normFile} (fail-closed): ${err.message}`)
       }
-    } catch {}
+    }
   }
 
   return findings
 }
 
 function main() {
-  const args = process.argv.slice(2)
-  const doHistory = args.includes('--history')
-  const allowlistPath = resolve('scripts/security/secret-allowlist.json')
-  const baselinePath = resolve('scripts/security/secret-baseline.json')
+  try {
+    const args = process.argv.slice(2)
+    const doHistory = args.includes('--history')
+    const allowlistPath = resolve('scripts/security/secret-allowlist.json')
+    const baselinePath = resolve('scripts/security/secret-baseline.json')
 
-  console.log('🔍 Iniciando escaneo de seguridad y detección de secretos en WHATSPOWER-ULTRA...')
-  const treeFindings = scanWorkingTree()
-  const { kept: activeViolations, excluded: allowedFindings } = filterAllowlist(treeFindings, allowlistPath)
+    console.log('🔍 Iniciando escaneo de seguridad y detección de secretos en WHATSPOWER-ULTRA...')
+    const treeFindings = scanWorkingTree()
+    const { kept: activeViolations, excluded: allowedFindings } = filterAllowlist(treeFindings, allowlistPath)
 
-  if (allowedFindings.length > 0) {
-    console.log(`ℹ️  ${allowedFindings.length} hallazgo(s) justificado(s) en allowlist (${allowlistPath}):`)
-    for (const a of allowedFindings) {
-      console.log(`   [${a.pattern}] ${a.source}:${a.line} — ${a.reason}`)
-    }
-  }
-
-  let historyViolations = []
-  if (doHistory) {
-    const historyFindings = scanGitHistory()
-    const { isNew, known } = filterBaseline(historyFindings, baselinePath)
-    if (known.length > 0) {
-      console.log(`ℹ️  ${known.length} hallazgo(s) históricos conocidos en baseline (${baselinePath}):`)
-      for (const k of known) {
-        console.log(`   [${k.pattern}] ${k.source} (Estado: ${k.status})`)
+    if (allowedFindings.length > 0) {
+      console.log(`ℹ️  ${allowedFindings.length} hallazgo(s) justificado(s) en allowlist (${allowlistPath}):`)
+      for (const a of allowedFindings) {
+        console.log(`   [${a.pattern}] ${a.source}:${a.line} — ${a.reason}`)
       }
     }
-    historyViolations = isNew
-  }
 
-  const totalFailures = activeViolations.length + historyViolations.length
+    let historyViolations = []
+    if (doHistory) {
+      const historyFindings = scanGitHistory()
+      const { isNew, known } = filterBaseline(historyFindings, baselinePath)
+      if (known.length > 0) {
+        console.log(`ℹ️  ${known.length} hallazgo(s) históricos conocidos en baseline (${baselinePath}):`)
+        for (const k of known) {
+          console.log(`   [${k.pattern}] ${k.source} (Estado: ${k.status})`)
+        }
+      }
+      historyViolations = isNew
+    }
 
-  if (totalFailures > 0) {
-    console.error(`\n❌ ESCÁNER DE SECRETOS DETUVO EL PROCESO: Se detectaron ${totalFailures} secreto(s) no autorizados:`)
-    for (const v of activeViolations) {
-      console.error(`   [ÁRBOL] ${v.pattern} en ${v.source}:${v.line} -> Vista previa: ${v.preview} [Huella: ${v.fingerprint}]`)
+    const totalFailures = activeViolations.length + historyViolations.length
+
+    if (totalFailures > 0) {
+      console.error(`\n❌ ESCÁNER DE SECRETOS DETUVO EL PROCESO: Se detectaron ${totalFailures} secreto(s) no autorizados:`)
+      for (const v of activeViolations) {
+        console.error(`   [ÁRBOL] ${v.pattern} en ${v.source}:${v.line} -> Vista previa: ${v.preview} [Huella: ${v.fingerprint}]`)
+      }
+      for (const h of historyViolations) {
+        console.error(`   [HISTORIAL] ${h.pattern} en ${h.source}:${h.line} -> Vista previa: ${h.preview} [Huella: ${h.fingerprint}]`)
+      }
+      console.error('\nAcción requerida: Elimina las credenciales y rótalas inmediatamente.')
+      process.exit(1)
     }
-    for (const h of historyViolations) {
-      console.error(`   [HISTORIAL] ${h.pattern} en ${h.source}:${h.line} -> Vista previa: ${h.preview} [Huella: ${h.fingerprint}]`)
-    }
-    console.error('\nAcción requerida: Elimina las credenciales y rótalas inmediatamente.')
+
+    console.log('✅ Escaneo de secretos completado: 0 secretos no autorizados detectados.')
+    process.exit(0)
+  } catch (err) {
+    console.error(`\n❌ ESCÁNER DE SECRETOS FALLÓ (FAIL-CLOSED): ${err.message}`)
     process.exit(1)
   }
-
-  console.log('✅ Escaneo de secretos completado: 0 secretos no autorizados detectados.')
-  process.exit(0)
 }
 
 if (process.argv[1] && process.argv[1].endsWith('scan-secrets.mjs')) {
