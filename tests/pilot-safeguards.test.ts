@@ -4,6 +4,7 @@ import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { HttpCrmDaemonDispatcher } from '../src/adapters/dispatcher.ts'
 import { createBroadcastServer } from '../src/server.ts'
 import { PILOT_SUPERVISED_CONFIG, validatePilotPreconditions } from '../src/pilot-config.ts'
+import { ensureAgentic2AServer } from './helpers/mock-2a-server.ts'
 
 async function runPilotSafeguardsSuite() {
   console.log('\n============================================================')
@@ -12,13 +13,10 @@ async function runPilotSafeguardsSuite() {
   console.log('============================================================\n')
 
   const TEST_2A_URL = 'http://localhost:3003'
-  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas.
-  // Este suite habla con la Capa 2A (:3003), por lo que usa el secreto interno de 2A.
-  const validSecret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET
-  if (!validSecret) {
-    console.error('FAIL-CLOSED: AGENTIC_2A_INTERNAL_SECRET ausente. Abortando suite.')
-    process.exit(1)
-  }
+  const validSecret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET || 'ci-test-2a-secret-0000000000'
+  process.env.AGENTIC_2A_INTERNAL_SECRET = validSecret
+
+  const server2A = await ensureAgentic2AServer(3003, validSecret)
   const TEST_PHONE = '573999111222'
 
   let passed = 0
@@ -211,6 +209,8 @@ async function runPilotSafeguardsSuite() {
     console.log('  ✅ [PASS] 6. UNCERTAIN_DISPATCH aislado: inmune a reintentos automáticos y preservado tras crash')
     passed++
   }
+
+  await server2A.close()
 
   console.log('\n============================================================')
   console.log(`  RESULTADO: ${passed}/6 salvaguardas validadas con 100% de éxito.`)

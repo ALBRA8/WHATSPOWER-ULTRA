@@ -92,6 +92,7 @@ describe('B4: ítems de campaña sin organización — cuarentena, nunca despach
 
     const orphanRow = db.prepare('SELECT organization_id FROM campaign_items WHERE id = ?').get('itm_orphan_1') as { organization_id: string | null }
     assert.equal(orphanRow.organization_id, null, 'el ítem huérfano (sin campaña) queda sin identidad')
+    db.close()
     rmSync(dir, { recursive: true, force: true })
   })
 

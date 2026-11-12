@@ -54,7 +54,7 @@ export class MetaCloudDispatcher implements Dispatcher {
   dispatchedMessages: Array<{ to: string; text: string; messageId: string; timestamp: number; organizationId: string; phoneNumberId: string }> = []
 
   constructor(config?: MetaCloudConfig) {
-    this.registry = config?.registry ?? new OrgWaCredentialRegistry([new EnvOrgWaSource()])
+    this.registry = config?.registry ?? new OrgWaCredentialRegistry()
     this.apiVersion = config?.apiVersion ?? process.env.META_GRAPH_VERSION ?? 'v21.0'
     // Mock SOLO explícito (mockMode=true): nunca por ausencia de credenciales
     // (prohibido el Mock silencioso; sin conexión la org FALLA, no simula).

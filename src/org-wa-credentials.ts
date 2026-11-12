@@ -21,6 +21,7 @@
  * MISMA en los tres módulos (CRM → WHATSPOWER → ULTRA).
  */
 import { timingSafeEqual } from 'node:crypto'
+import { safeEqual } from './security.ts'
 
 export interface OrgConnection {
   organizationId: string
@@ -49,7 +50,7 @@ export interface OrgWaSource {
 // ===========================================================================
 
 function timingSafeEqualStrings(a: string, b: string): boolean {
-  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))
+  return safeEqual(a, b)
 }
 
 export function parseOrgNumbers(raw: string | undefined): Array<{ orgId: string; phoneNumberId: string }> {

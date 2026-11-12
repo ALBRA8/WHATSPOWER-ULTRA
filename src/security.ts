@@ -265,7 +265,7 @@ export function parseLeadSecretSpec(env: NodeJS.ProcessEnv = process.env): LeadS
       byOrg.set(org, [secretPart])
     }
   }
-  if (byOrg.size === 0 && env.WEBHOOK_LEAD_SECRET) {
+  if (!byOrg.has(LEGACY_LEAD_ORG) && env.WEBHOOK_LEAD_SECRET) {
     byOrg.set(LEGACY_LEAD_ORG, [env.WEBHOOK_LEAD_SECRET])
   }
   return { byOrg }

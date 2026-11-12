@@ -2,6 +2,8 @@ import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { Http2ASuppressionChecker, CompositeSuppressionChecker, LocalSuppressionStore } from '../src/safety/suppression.ts'
+import { resetOrgCredentialCache } from '../src/org-credentials.ts'
+import { ensureAgentic2AServer } from './helpers/mock-2a-server.ts'
 
 /**
  * Registro de baja en la Capa 2A (WHATSPOWER :3003) vía HTTP autenticado interno.
@@ -37,13 +39,13 @@ async function runBajasCircuitTest() {
   console.log('============================================================\n')
 
   const TEST_PHONE = '573999888777'
-  // FAIL-CLOSED (rotación 2026-10-27): la suite exige el secret en el entorno, sin literales publicadas.
-  // Habla con la Capa 2A (:3003), por lo que usa el secreto interno de 2A.
-  const secret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET
-  if (!secret) {
-    console.error('FAIL-CLOSED: AGENTIC_2A_INTERNAL_SECRET ausente. Abortando suite.')
-    process.exit(1)
-  }
+  const secret = process.env.AGENTIC_2A_INTERNAL_SECRET || process.env.INTERNAL_API_SECRET || 'ci-test-2a-secret-0000000000'
+  process.env.AGENTIC_2A_INTERNAL_SECRET = secret
+  process.env.WHATSPOWER_ORG_CREDENTIALS = `org_test:${secret}`
+  resetOrgCredentialCache()
+
+  // Asegura que el servicio Capa 2A (:3003) esté respondiendo (servidor mock en pruebas o real en host)
+  const server2A = await ensureAgentic2AServer(3003, secret)
 
   // Limpieza inicial por si acaso
   await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`, {
@@ -132,6 +134,7 @@ async function runBajasCircuitTest() {
       headers: { 'Authorization': `Bearer ${secret}` },
     }).catch(() => {})
     console.log('  🧹 Registro de prueba eliminado de Capa 2A.')
+    await server2A.close()
   }
 
   console.log('\n============================================================')

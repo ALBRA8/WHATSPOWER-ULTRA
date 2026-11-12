@@ -20,6 +20,40 @@ export interface CreateCampaignOptions {
   csvContent: string
 }
 
+/**
+ * Clasificación de errores de despacho:
+ * Errores permanentes/fatales (de configuración, autorización, tenencia o rechazo cliente 4xx)
+ * pasan de inmediato a FAILED_FATAL sin reintentos inútiles.
+ * Errores transitorios (red temporal, rate limit temporal 429) pasan a FAILED_RETRYABLE.
+ */
+export function isPermanentDispatchFailure(error: string | undefined): boolean {
+  if (!error) return false
+  const err = error.toUpperCase()
+  if (
+    err.includes('DISPATCH_BLOCKED') ||
+    err.includes('ORG_REQUIRED') ||
+    err.includes('NO_CONNECTED_NUMBER') ||
+    err.includes('CREDENTIAL_UNAVAILABLE') ||
+    err.includes('TENANT_CONTEXT') ||
+    err.includes('QUARANTINED')
+  ) {
+    return true
+  }
+  if (
+    err.includes('HTTP_400') ||
+    err.includes('HTTP_401') ||
+    err.includes('HTTP_403') ||
+    err.includes('HTTP_404') ||
+    err.includes('HTTP_410') ||
+    err.includes('HTTP_413') ||
+    err.includes('HTTP_422') ||
+    err.includes('INVALID_PHONE')
+  ) {
+    return true
+  }
+  return false
+}
+
 export class BroadcastEngine {
   db: DatabaseSync
   dispatcher: Dispatcher
@@ -415,8 +449,10 @@ export class BroadcastEngine {
       this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: 'UNCERTAIN_DISPATCH', error: dispatchRes.error }
     } else {
-      // Fallo confirmado por el daemon (400, auth, etc.)
-      const isRetryable = nextItem.retryCount < 2
+      // Fallo confirmado por el daemon / transport:
+      // Si el fallo es permanente (rechazo 4xx, credencial inválida, etc.), no reintentar a ciegas.
+      const isPermanent = isPermanentDispatchFailure(dispatchRes.error)
+      const isRetryable = !isPermanent && nextItem.retryCount < 2
       const newStatus = isRetryable ? 'FAILED_RETRYABLE' : 'FAILED_FATAL'
 
       this.db.prepare(`
