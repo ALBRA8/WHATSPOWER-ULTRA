@@ -146,8 +146,8 @@ export function validateBaseline(entries) {
     if (!e || typeof e !== 'object') {
       throw new Error(`Baseline entrada #${i} inválida: debe ser un objeto JSON`)
     }
-    if (typeof e.commit !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(e.commit)) {
-      throw new Error(`Baseline entrada #${i} inválida: 'commit' debe ser un hash Git válido (≥7 hex)`)
+    if (typeof e.commit !== 'string' || !/^[0-9a-fA-F]{40}$/.test(e.commit)) {
+      throw new Error(`Baseline entrada #${i} inválida: 'commit' debe ser un hash Git SHA-1 completo de exactamente 40 caracteres hexadecimales`)
     }
     if (typeof e.file !== 'string' || !e.file.trim() || e.file.includes('*')) {
       throw new Error(`Baseline entrada #${i} inválida: 'file' debe ser una ruta de archivo específica`)
@@ -198,7 +198,7 @@ export function filterAllowlist(findings, allowlistOrPath) {
 }
 
 export function parseSource(source) {
-  const m = source.match(/^commit\s+([0-9a-fA-F]+)\s+\((.+)\)$/)
+  const m = source.match(/^commit\s+([0-9a-fA-F]{40})\s+\((.+)\)$/)
   if (m) {
     return { isHistory: true, commit: m[1].toLowerCase(), file: normalizePath(m[2]) }
   }
@@ -222,7 +222,7 @@ export function filterBaseline(findings, baselineOrPath) {
       (b) =>
         b.category === f.pattern &&
         b.fingerprint.toLowerCase() === f.fingerprint.toLowerCase() &&
-        (src.commit === b.commit.toLowerCase() || (src.commit.startsWith(b.commit.toLowerCase()) && b.commit.length >= 7)) &&
+        src.commit.toLowerCase() === b.commit.toLowerCase() &&
         normFile === normalizePath(b.file)
     )
     if (match) known.push({ ...f, status: match.status, rotation: match.rotation })
@@ -297,7 +297,7 @@ export function scanGitHistory(options = {}) {
     for (const file of files) {
       if (shouldSkipFile(file)) continue
       const normFile = normalizePath(file)
-      const blobKey = `${commit.slice(0, 8)}:${normFile}`
+      const blobKey = `${commit}:${normFile}`
       if (scannedBlobs.has(blobKey)) continue
       scannedBlobs.add(blobKey)
 
@@ -306,7 +306,7 @@ export function scanGitHistory(options = {}) {
           encoding: 'utf8',
           maxBuffer: 32 * 1024 * 1024,
         })
-        findings.push(...scanText(blob, `commit ${commit.slice(0, 8)} (${normFile})`))
+        findings.push(...scanText(blob, `commit ${commit} (${normFile})`))
       } catch (err) {
         throw new Error(`Error al leer blob de Git para ${commit}:${normFile} (fail-closed): ${err.message}`)
       }

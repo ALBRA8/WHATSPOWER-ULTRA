@@ -11,28 +11,19 @@ import {
   normalizePath,
   scanWorkingTree,
   scanGitHistory,
+  parseSource,
   PATTERNS,
   ALLOW_MARK,
   type SecretFinding,
   type AllowlistEntry,
   type BaselineEntry,
 } from '../scripts/scan-secrets.mjs'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 
-function runBaselineCase(baseline: unknown[], finding: unknown) {
-  const dir = mkdtempSync(join(tmpdir(), 'scan-secrets-baseline-'))
-  const baselinePath = join(dir, 'baseline.json')
-  writeFileSync(baselinePath, JSON.stringify(baseline), 'utf8')
-  try {
-    return filterBaseline([finding] as any[], baselinePath)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-}
+const SHA_VALID_A = '11223344556677889900aabbccddeeff00112233'
+const SHA_VALID_B = '1122334499887766554433221100ffeeddccbbaa' // comparte los primeros 8 chars con A
+const SHA_DIFF    = '99887766554433221100ffeeddccbbaa00112233'
 
-describe('SECRETS SCANNER: Auditoría y Pruebas Reales de Seguridad', () => {
+describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pruebas Reales', () => {
   it('SEC-01: ningún patrón de expresión regular tiene bandera "g" en .test()/.exec() (inmunidad a lastIndex)', () => {
     for (const pat of PATTERNS) {
       assert.strictEqual(
@@ -134,192 +125,251 @@ describe('SECRETS SCANNER: Auditoría y Pruebas Reales de Seguridad', () => {
     assert.strictEqual(kept[0].pattern, 'OPENAI_KEY')
   })
 
-  it('SEC-07: filterBaseline real rechaza la misma huella en un commit nuevo', () => {
-    const baseline = [
+  // =========================================================================
+  // SUITE OBLIGATORIA: SHA-01 a SHA-10 (Validación estricta de 40 caracteres)
+  // =========================================================================
+
+  it('SHA-01: una coincidencia con SHA completo idéntico (40 hex) se acepta en el baseline', () => {
+    const baseline: BaselineEntry[] = [
       {
-        commit: '11223344',
-        file: 'tests/old-test.ts',
-        category: 'META_TOKEN',
+        commit: SHA_VALID_A,
+        file: 'tests/valid.ts',
+        category: 'CONFIG_SECRET',
         fingerprint: 'cafebeef1234',
         status: 'synthetic-test-fixture',
         rotation: 'dummy',
       },
     ]
-    const finding = {
-      pattern: 'META_TOKEN',
-      desc: 'Meta Token',
-      source: 'commit 99887766 (tests/old-test.ts)',
-      line: 15,
-      preview: 'EAAG…(30 caracteres)',
+    const finding: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: `commit ${SHA_VALID_A} (tests/valid.ts)`,
+      line: 10,
+      preview: 'secr…(20 caracteres)',
       fingerprint: 'cafebeef1234',
     }
 
-    const result = runBaselineCase(baseline, finding)
-    assert.strictEqual(result.isNew.length, 1)
-    assert.strictEqual(result.known.length, 0)
+    const { known, isNew } = filterBaseline([finding], baseline)
+    assert.strictEqual(known.length, 1, 'Debe ser reconocido como conocido con SHA completo exacto')
+    assert.strictEqual(isNew.length, 0)
   })
 
-  it('SEC-08: filterBaseline real rechaza la misma huella en otra ruta', () => {
-    const baseline = [
+  it('SHA-02: un SHA diferente se rechaza y se marca como violación nueva (isNew)', () => {
+    const baseline: BaselineEntry[] = [
       {
-        commit: '11223344',
-        file: 'tests/legitimate-test.ts',
+        commit: SHA_VALID_A,
+        file: 'tests/valid.ts',
         category: 'CONFIG_SECRET',
-        fingerprint: 'deadbeef5678',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
-      },
-    ]
-    const finding = {
-      pattern: 'CONFIG_SECRET',
-      desc: 'Config Secret',
-      source: 'commit 11223344 (src/production-file.ts)',
-      line: 42,
-      preview: 'secr…(25 caracteres)',
-      fingerprint: 'deadbeef5678',
-    }
-
-    const result = runBaselineCase(baseline, finding)
-    assert.strictEqual(result.isNew.length, 1)
-    assert.strictEqual(result.known.length, 0)
-  })
-
-  it('SEC-09: filterBaseline real solo acepta coincidencia exacta de commit, ruta, categoría y huella', () => {
-    const baseline = [
-      {
-        commit: '11223344',
-        file: 'tests/legitimate-test.ts',
-        category: 'CONFIG_SECRET',
-        fingerprint: 'deadbeef5678',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
-      },
-    ]
-    const finding = {
-      pattern: 'CONFIG_SECRET',
-      desc: 'Config Secret',
-      source: 'commit 11223344 (tests/legitimate-test.ts)',
-      line: 10,
-      preview: 'secr…(25 caracteres)',
-      fingerprint: 'deadbeef5678',
-    }
-
-    const result = runBaselineCase(baseline, finding)
-    assert.strictEqual(result.known.length, 1)
-    assert.strictEqual(result.isNew.length, 0)
-  })
-
-  it('SEC-10: filterBaseline real rechaza coincidencias por sufijo de ruta', () => {
-    const baseline = [
-      {
-        commit: '11223344',
-        file: 'tests/legitimate-test.ts',
-        category: 'CONFIG_SECRET',
-        fingerprint: 'deadbeef5678',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
-      },
-    ]
-    const finding = {
-      pattern: 'CONFIG_SECRET',
-      desc: 'Config Secret',
-      source: 'commit 11223344 (attacker/tests/legitimate-test.ts)',
-      line: 10,
-      preview: 'secr…(25 caracteres)',
-      fingerprint: 'deadbeef5678',
-    }
-
-    const result = runBaselineCase(baseline, finding)
-    assert.strictEqual(result.isNew.length, 1)
-    assert.strictEqual(result.known.length, 0)
-  })
-
-  it('SEC-NEG-01: MISMA huella en OTRO commit es marcada como violación nueva (isNew)', () => {
-    const baselineMock: BaselineEntry[] = [
-      {
-        commit: '11223344',
-        file: 'tests/old-test.ts',
-        category: 'META_TOKEN',
         fingerprint: 'cafebeef1234',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
       },
     ]
+    const finding: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: `commit ${SHA_DIFF} (tests/valid.ts)`,
+      line: 10,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: 'cafebeef1234',
+    }
 
-    const findings: SecretFinding[] = [
+    const { known, isNew } = filterBaseline([finding], baseline)
+    assert.strictEqual(isNew.length, 1, 'Un SHA de commit diferente debe ser marcado como violación nueva')
+    assert.strictEqual(known.length, 0)
+  })
+
+  it('SHA-03: dos SHA distintos que comparten los primeros ocho caracteres NO pueden autorizarse mutuamente', () => {
+    // SHA_VALID_A y SHA_VALID_B comparten '11223344', pero son commits completamente distintos
+    assert.strictEqual(SHA_VALID_A.slice(0, 8), SHA_VALID_B.slice(0, 8))
+    assert.notStrictEqual(SHA_VALID_A, SHA_VALID_B)
+
+    const baseline: BaselineEntry[] = [
       {
-        pattern: 'META_TOKEN',
-        desc: 'Meta Token',
-        source: 'commit 99887766 (tests/old-test.ts)',
-        line: 15,
-        preview: 'EAAG…(30 caracteres)',
+        commit: SHA_VALID_A,
+        file: 'tests/file.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: 'cafebeef1234',
+      },
+    ]
+    const finding: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: `commit ${SHA_VALID_B} (tests/file.ts)`,
+      line: 10,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: 'cafebeef1234',
+    }
+
+    const { known, isNew } = filterBaseline([finding], baseline)
+    assert.strictEqual(isNew.length, 1, 'Coincidencia parcial de 8 caracteres NO debe autorizar el commit')
+    assert.strictEqual(known.length, 0)
+  })
+
+  it('SHA-04: un SHA de ocho caracteres en el baseline se rechaza por validateBaseline (fail-closed)', () => {
+    const badBaseline = [
+      {
+        commit: '11223344', // solo 8 caracteres
+        file: 'tests/file.ts',
+        category: 'CONFIG_SECRET',
         fingerprint: 'cafebeef1234',
       },
     ]
 
-    const { known, isNew } = filterBaseline(findings, baselineMock)
-
-    assert.strictEqual(isNew.length, 1, 'Debe marcarse como isNew porque el commit es diferente')
-    assert.strictEqual(known.length, 0, 'No debe ser autorizado por el baseline')
+    assert.throws(
+      () => validateBaseline(badBaseline),
+      /exactamente 40 caracteres hexadecimales/
+    )
   })
 
-  it('SEC-NEG-02: MISMA huella en OTRO archivo es marcada como violación nueva (isNew)', () => {
-    const baselineMock: BaselineEntry[] = [
+  it('SHA-05: un SHA de 39 caracteres se rechaza por validateBaseline (fail-closed)', () => {
+    const sha39 = '1'.repeat(39)
+    assert.strictEqual(sha39.length, 39)
+
+    const badBaseline = [
       {
-        commit: '11223344',
-        file: 'tests/legitimate-test.ts',
+        commit: sha39,
+        file: 'tests/file.ts',
         category: 'CONFIG_SECRET',
-        fingerprint: 'deadbeef5678',
-        status: 'synthetic-test-fixture',
-        rotation: 'dummy',
+        fingerprint: 'cafebeef1234',
       },
     ]
 
-    const findings: SecretFinding[] = [
+    assert.throws(
+      () => validateBaseline(badBaseline),
+      /exactamente 40 caracteres hexadecimales/
+    )
+  })
+
+  it('SHA-06: un SHA de 41 caracteres se rechaza por validateBaseline (fail-closed)', () => {
+    const sha41 = '1'.repeat(41)
+    assert.strictEqual(sha41.length, 41)
+
+    const badBaseline = [
       {
-        pattern: 'CONFIG_SECRET',
-        desc: 'Config Secret',
-        source: 'commit 11223344 (src/production-file.ts)',
-        line: 42,
-        preview: 'secr…(25 caracteres)',
-        fingerprint: 'deadbeef5678',
+        commit: sha41,
+        file: 'tests/file.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: 'cafebeef1234',
       },
     ]
 
-    const { known, isNew } = filterBaseline(findings, baselineMock)
+    assert.throws(
+      () => validateBaseline(badBaseline),
+      /exactamente 40 caracteres hexadecimales/
+    )
+  })
 
-    assert.strictEqual(isNew.length, 1, 'Misma huella en archivo distinto DEBE ser violación nueva')
+  it('SHA-07: un SHA con caracteres no hexadecimales se rechaza por validateBaseline (fail-closed)', () => {
+    const shaNonHex = '11223344556677889900aabbccddeeffzzzzzzzz' // z no es hex
+    assert.strictEqual(shaNonHex.length, 40)
+
+    const badBaseline = [
+      {
+        commit: shaNonHex,
+        file: 'tests/file.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: 'cafebeef1234',
+      },
+    ]
+
+    assert.throws(
+      () => validateBaseline(badBaseline),
+      /exactamente 40 caracteres hexadecimales/
+    )
+  })
+
+  it('SHA-08: el historial produce fuentes con SHA completos de 40 caracteres, no truncados', () => {
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('rev-list')) {
+        return `${SHA_VALID_A}\n`
+      }
+      if (cmd.includes('--name-only')) {
+        return 'src/example.ts\n'
+      }
+      if (cmd.includes('show')) {
+        const dummyToken = ['EAAG', '1234567890abcdef1234567890'].join('')
+        return `const token = "${dummyToken}"\n`
+      }
+      return ''
+    }
+
+    const findings = scanGitHistory({ execFn: fakeExec })
+    assert.strictEqual(findings.length, 1)
+
+    // La fuente generada debe conservar los 40 caracteres exactos
+    assert.strictEqual(findings[0].source, `commit ${SHA_VALID_A} (src/example.ts)`)
+
+    // Y parseSource debe recuperar el commit completo de 40 caracteres
+    const parsed = parseSource(findings[0].source)
+    assert.strictEqual(parsed.isHistory, true)
+    assert.strictEqual(parsed.commit, SHA_VALID_A.toLowerCase())
+    assert.strictEqual(parsed.commit.length, 40)
+  })
+
+  it('SHA-09: una ruta distinta se rechaza aunque el SHA, categoría y huella coincidan', () => {
+    const baseline: BaselineEntry[] = [
+      {
+        commit: SHA_VALID_A,
+        file: 'tests/original.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: 'cafebeef1234',
+      },
+    ]
+    const finding: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: `commit ${SHA_VALID_A} (tests/otra-ruta.ts)`,
+      line: 10,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: 'cafebeef1234',
+    }
+
+    const { known, isNew } = filterBaseline([finding], baseline)
+    assert.strictEqual(isNew.length, 1, 'Ruta distinta debe rechazarse aunque el commit coincida')
     assert.strictEqual(known.length, 0)
   })
 
-  it('SEC-NEG-03: MISMO archivo con contexto histórico diferente (commit no emparentado)', () => {
-    const baselineMock: BaselineEntry[] = [
+  it('SHA-10: una categoría o huella diferente se rechaza aunque el resto coincida', () => {
+    const baseline: BaselineEntry[] = [
       {
-        commit: 'abcdef12',
-        file: 'tests/test-file.ts',
-        category: 'JWT',
-        fingerprint: '010203040506',
+        commit: SHA_VALID_A,
+        file: 'tests/valid.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: 'cafebeef1234',
       },
     ]
 
-    const findings: SecretFinding[] = [
-      {
-        pattern: 'JWT',
-        desc: 'Token JWT',
-        source: 'commit 12345678 (tests/test-file.ts)',
-        line: 1,
-        preview: 'eyJ…(20 caracteres)',
-        fingerprint: '010203040506',
-      },
-    ]
+    // 1. Misma huella pero diferente categoría -> rechazo
+    const findingDiffCat: SecretFinding = {
+      pattern: 'META_TOKEN',
+      desc: 'Meta',
+      source: `commit ${SHA_VALID_A} (tests/valid.ts)`,
+      line: 10,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: 'cafebeef1234',
+    }
+    const resCat = filterBaseline([findingDiffCat], baseline)
+    assert.strictEqual(resCat.isNew.length, 1)
+    assert.strictEqual(resCat.known.length, 0)
 
-    const { known, isNew } = filterBaseline(findings, baselineMock)
-
-    assert.strictEqual(isNew.length, 1, 'Contexto histórico no coincidente debe ser marcado como violación')
-    assert.strictEqual(known.length, 0)
+    // 2. Misma categoría pero diferente huella -> rechazo
+    const findingDiffFp: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: `commit ${SHA_VALID_A} (tests/valid.ts)`,
+      line: 10,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: '000000000000',
+    }
+    const resFp = filterBaseline([findingDiffFp], baseline)
+    assert.strictEqual(resFp.isNew.length, 1)
+    assert.strictEqual(resFp.known.length, 0)
   })
 
-  it('SEC-NEG-04: Coincidencias por sufijo de ruta son RECHAZADAS (no match por endsWith)', () => {
+  // =========================================================================
+  // PRUEBAS DE FAIL-CLOSED Y VALIDACIÓN ESTRUCTURAL
+  // =========================================================================
+
+  it('SEC-FAIL-01: Coincidencias por sufijo de ruta son RECHAZADAS en allowlist y baseline', () => {
     const allowlistMock: AllowlistEntry[] = [
       {
         file: 'tests/foo.ts',
@@ -328,107 +378,59 @@ describe('SECRETS SCANNER: Auditoría y Pruebas Reales de Seguridad', () => {
         reason: 'Fixture legítimo',
       },
     ]
+    const finding: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: 'malicious/tests/foo.ts',
+      line: 5,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: '112233445566',
+    }
 
-    const findings: SecretFinding[] = [
-      {
-        pattern: 'CONFIG_SECRET',
-        desc: 'Secret',
-        source: 'malicious/tests/foo.ts',
-        line: 5,
-        preview: 'secr…(20 caracteres)',
-        fingerprint: '112233445566',
-      },
-    ]
-
-    const { kept, excluded } = filterAllowlist(findings, allowlistMock)
-
-    assert.strictEqual(kept.length, 1, 'Ruta con coincidencia por sufijo NO debe coincidir con la allowlist')
+    const { kept, excluded } = filterAllowlist([finding], allowlistMock)
+    assert.strictEqual(kept.length, 1)
     assert.strictEqual(excluded.length, 0)
   })
 
-  it('SEC-NEG-05: Baseline manipulado — valida estructura y lanza error fail-closed', () => {
-    assert.throws(() => validateBaseline('no-array' as any), /Baseline inválido/)
-
-    assert.throws(
-      () => validateBaseline([{ file: 'a.ts', category: 'JWT', fingerprint: '112233445566' }]),
-      /commit/
-    )
-
-    assert.throws(
-      () => validateBaseline([{ commit: '11223344', file: '*.ts', category: 'JWT', fingerprint: '112233445566' }]),
-      /file/
-    )
-
-    assert.throws(
-      () => validateBaseline([{ commit: '11223344', file: 'a.ts', category: 'INVENTADA', fingerprint: '112233445566' }]),
-      /categoría desconocida/
-    )
-
-    assert.throws(
-      () => validateBaseline([{ commit: '11223344', file: 'a.ts', category: 'JWT', fingerprint: 'corta' }]),
-      /huella sha256/
-    )
-  })
-
-  it('SEC-NEG-06: Allowlist excesiva — prohíbe comodines y campos vacíos (fail-closed)', () => {
+  it('SEC-FAIL-02: Allowlist con comodín o sin justificación es rechazada por validateAllowlist', () => {
     assert.throws(
       () => validateAllowlist([{ file: '*', category: 'JWT', fingerprint: '112233445566', reason: 'excesivo' }]),
       /no comodín/
     )
-
     assert.throws(
       () => validateAllowlist([{ file: 'tests/a.ts', category: 'JWT', fingerprint: '112233445566', reason: '' }]),
       /reason/
     )
   })
 
-  it('SEC-NEG-07: Error al ejecutar Git en scanWorkingTree produce fallo fail-closed (throw)', () => {
+  it('SEC-FAIL-03: Error al ejecutar Git en scanWorkingTree produce fallo fail-closed (throw)', () => {
     const fakeExecFail = () => {
       throw new Error('fatal: not a git repository')
     }
-
     assert.throws(
       () => scanWorkingTree({ execFn: fakeExecFail }),
       /Fallo de Git al listar archivos rastreados \(fail-closed\)/
     )
   })
 
-  it('SEC-NEG-08: Historial incompleto (commits vacíos o shallow) produce fallo fail-closed (throw)', () => {
+  it('SEC-FAIL-04: Historial Git vacío o incompleto produce fallo fail-closed (throw)', () => {
     const fakeExecEmpty = (cmd: string) => {
       if (cmd.includes('rev-list')) return ''
       return ''
     }
-
     assert.throws(
       () => scanGitHistory({ execFn: fakeExecEmpty }),
       /Historial Git vacío o incompleto/
     )
   })
 
-  it('SEC-NEG-09: Archivos no rastreados o inaccesibles producen fallo fail-closed (throw)', () => {
-    const fakeExec = (cmd: string) => {
-      if (cmd.includes('ls-files')) return 'src/unreadable.ts\n'
-      return ''
-    }
-    const fakeReadFail = () => {
-      throw new Error('EACCES: permission denied')
-    }
-
-    assert.throws(
-      () => scanWorkingTree({ execFn: fakeExec, readFn: fakeReadFail }),
-      /No se pudo leer el archivo rastreado src\/unreadable\.ts \(fail-closed\)/
-    )
-  })
-
-  it('SEC-NEG-10: Detección de secretos en los propios archivos de seguridad', () => {
+  it('SEC-FAIL-05: Detección de secretos en los propios archivos de seguridad', () => {
     const fakeToken = ['ghp', 'secretInsideAllowlistFile1234567890'].join('_')
     const badContent = JSON.stringify([
       { file: 'tests/a.ts', category: 'GITHUB_PAT', fingerprint: '112233445566', reason: `Token real: ${fakeToken}` },
     ])
-
     const findings = scanText(badContent, 'scripts/security/secret-allowlist.json')
-
-    assert.strictEqual(findings.length, 1, 'Debe detectar secretos inyectados en la propia allowlist')
+    assert.strictEqual(findings.length, 1)
     assert.strictEqual(findings[0].pattern, 'GITHUB_PAT')
   })
 })
