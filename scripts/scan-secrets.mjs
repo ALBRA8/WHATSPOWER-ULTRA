@@ -152,8 +152,8 @@ export function filterBaseline(findings, baselinePath) {
         b.category === f.pattern &&
         b.fingerprint === f.fingerprint &&
         src.commit &&
-        src.commit.startsWith(b.commit.toLowerCase()) &&
-        (src.file === b.file.replace(/\\/g, '/') || src.file.endsWith('/' + b.file.replace(/\\/g, '/')))
+        src.commit === b.commit.toLowerCase() &&
+        src.file === b.file.replace(/\\/g, '/')
     )
     if (match) known.push({ ...f, status: match.status, rotation: match.rotation })
     else isNew.push(f)
