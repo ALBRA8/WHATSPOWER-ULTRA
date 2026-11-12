@@ -182,12 +182,13 @@ export function filterAllowlist(findings, allowlistOrPath) {
   const excluded = []
 
   for (const f of findings) {
-    const normSource = normalizePath(f.source)
+    const src = parseSource(f.source)
+    const normFile = normalizePath(src.file)
     const match = entries.find(
       (a) =>
         a.category === f.pattern &&
         a.fingerprint.toLowerCase() === f.fingerprint.toLowerCase() &&
-        normSource === normalizePath(a.file)
+        normFile === normalizePath(a.file)
     )
     if (match) excluded.push({ ...f, reason: match.reason })
     else kept.push(f)
@@ -336,7 +337,8 @@ function main() {
     let historyViolations = []
     if (doHistory) {
       const historyFindings = scanGitHistory()
-      const { isNew, known } = filterBaseline(historyFindings, baselinePath)
+      const { kept: historyAfterAllowlist } = filterAllowlist(historyFindings, allowlistPath)
+      const { isNew, known } = filterBaseline(historyAfterAllowlist, baselinePath)
       if (known.length > 0) {
         console.log(`ℹ️  ${known.length} hallazgo(s) históricos conocidos en baseline (${baselinePath}):`)
         for (const k of known) {
