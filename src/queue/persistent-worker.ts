@@ -35,6 +35,8 @@ export interface TickSummary {
   campaignsVisited: Array<{ campaignId: string; organizationId: string; itemsProcessed: number }>
   reconciledStaleClaims: number
   quarantinedOrgless: number
+  /** (hallazgo 10) campañas PAUSED_COOLDOWN reanudadas por cooldown vencido en este tick. */
+  cooldownResumed: number
   /** Conteo por resultado de ítem (SENT, UNCERTAIN_DISPATCH, …). */
   itemOutcomes: Record<string, number>
   errors: string[]
@@ -53,6 +55,21 @@ export interface PersistentWorkerOptions {
   /** Reloj inyectable (pruebas de horario comercial). Default: hora actual. */
   now?: () => Date
   logger?: (line: string) => void
+  /**
+   * (hallazgo 7) Mantiene vivo el PROCESO mientras el worker corre: el intervalo
+   * NO se unref-ea (por defecto el timer se unref-ea para no colgar procesos de
+   * prueba). `npm run worker` (worker-main) lo activa — sin esto el proceso
+   * puede terminar inmediatamente tras arrancar si no hay otros recursos refs.
+   */
+  keepProcessAlive?: boolean
+  /**
+   * (hallazgo 9) Respeta el PACING entre despachos: tras cada SENT espera
+   * nextPacingDelayMs() y PACING_DELAY se atiende esperando retryAfterMs.
+   * Default FALSE por compatibilidad (pruebas previas); worker-main lo activa.
+   */
+  respectPacing?: boolean
+  /** Espera inyectable (pruebas con reloj controlado, sin esperas reales). */
+  sleep?: (ms: number) => Promise<void>
 }
 
 export class PersistentBroadcastWorker {
@@ -68,6 +85,9 @@ export class PersistentBroadcastWorker {
   private inFlight: Promise<TickSummary> | null = null
   private ticksStarted = 0
   private stopped = false
+  private keepProcessAlive: boolean
+  private respectPacing: boolean
+  private sleep: (ms: number) => Promise<void>
 
   constructor(options: PersistentWorkerOptions) {
     this.engine = options.engine
@@ -77,6 +97,9 @@ export class PersistentBroadcastWorker {
     this.staleClaimSeconds = Math.max(30, options.staleClaimSeconds ?? 900)
     this.now = options.now ?? (() => new Date())
     this.logger = options.logger ?? (() => {})
+    this.keepProcessAlive = options.keepProcessAlive ?? false
+    this.respectPacing = options.respectPacing ?? false
+    this.sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   }
 
   /** Campañas RUNNING (FIFO por arranque). DRAFT/PAUSED* jamás se consumen aquí. */
@@ -130,13 +153,18 @@ export class PersistentBroadcastWorker {
       campaignsVisited: [],
       reconciledStaleClaims: 0,
       quarantinedOrgless: 0,
+      cooldownResumed: 0,
       itemOutcomes: {},
       errors: [],
     }
     this.inFlight = (async () => {
       try {
         // 1. Mantenimiento: claims expirados → UNCERTAIN_DISPATCH (resultado
-        //    incierto, JAMÁS reintento a ciegas) y cuarentena B4.
+        //    incierto, JAMÁS reintento a ciegas), cuarentena B4 y — (hallazgo 10)
+        //    reanudación AUTOMÁTICA de campañas pausadas SOLO por cooldown
+        //    DURABLE vencido (nunca pausas manuales ni estados terminales).
+        const resumed = this.engine.resumeCooldownExpiredCampaigns()
+        summary.cooldownResumed = resumed.resumed
         const reconciled = this.engine.reconcileStaleClaims(this.staleClaimSeconds)
         const quarantined = this.engine.quarantineOrglessItems()
         summary.reconciledStaleClaims = reconciled.reconciledCount
@@ -148,6 +176,10 @@ export class PersistentBroadcastWorker {
 
         for (const campaign of campaigns) {
           let processedForCampaign = 0
+          // (hallazgo 9) PACING_DELAY informado por el engine se ATIENDE: se
+          // espera retryAfterMs y se reintenta (máx 3 veces por campaña y tick
+          // con guard anti-bucle en relojes congelados de prueba).
+          let pacingRetries = 0
           for (let i = 0; i < this.itemsPerCampaignPerTick; i++) {
             let res
             try {
@@ -158,9 +190,23 @@ export class PersistentBroadcastWorker {
               summary.errors.push(`campaign ${campaign.id}: ${err instanceof Error ? err.message : String(err)}`)
               break
             }
+            if (res.status === 'PACING_DELAY' && this.respectPacing) {
+              if (pacingRetries >= 3) break
+              pacingRetries++
+              const waitMs = (res as { retryAfterMs?: number }).retryAfterMs ?? this.engine.throttler.nextPacingDelayMs()
+              summary.itemOutcomes['PACING_DELAY'] = (summary.itemOutcomes['PACING_DELAY'] ?? 0) + 1
+              await this.sleep(Math.max(0, waitMs))
+              i-- // el reintento del ítem en pacing NO consume el cupo de ítems
+              continue
+            }
             if (!res.processed) break // cola drenada, pausada, completada o en vuelo
             processedForCampaign++
             summary.itemOutcomes[res.status ?? 'UNKNOWN'] = (summary.itemOutcomes[res.status ?? 'UNKNOWN'] ?? 0) + 1
+            // (hallazgo 9) tras un despacho SENT se respeta el INTERVALO de pacing
+            // configurado (jitter min..max) antes del siguiente ítem.
+            if (this.respectPacing && res.status === 'SENT') {
+              await this.sleep(this.engine.throttler.nextPacingDelayMs())
+            }
             // Una campaña pausada/enfriada a mitad de tick deja de consumirse.
             if (res.status && res.status.startsWith('PAUSED')) break
           }
@@ -180,7 +226,12 @@ export class PersistentBroadcastWorker {
     return this.inFlight
   }
 
-  /** Arranca el bucle persistente. Idempotente. El intervalo no bloquea el exit del proceso. */
+  /**
+   * Arranca el bucle persistente. Idempotente.
+   * (hallazgo 7) con keepProcessAlive el timer se QUEDA referenciado (ref): el
+   * proceso worker permanece vivo hasta stop(); sin la opción el timer se
+   * unref-ea (comportamiento previo, pensado para procesos de prueba).
+   */
   start(): void {
     if (this.timer) return
     this.stopped = false
@@ -188,8 +239,10 @@ export class PersistentBroadcastWorker {
       if (this.inFlight) return // guard de solapamiento
       void this.runOnce().catch((err) => this.logger(`[worker 2B] error de tick: ${err instanceof Error ? err.message : String(err)}`))
     }, this.tickIntervalMs)
-    ;(this.timer as unknown as { unref?: () => void }).unref?.()
-    this.logger(`[worker 2B] bucle persistente iniciado (intervalo=${this.tickIntervalMs}ms, ítems/campaña/tick=${this.itemsPerCampaignPerTick})`)
+    if (!this.keepProcessAlive) {
+      ;(this.timer as unknown as { unref?: () => void }).unref?.()
+    }
+    this.logger(`[worker 2B] bucle persistente iniciado (intervalo=${this.tickIntervalMs}ms, ítems/campaña/tick=${this.itemsPerCampaignPerTick}${this.keepProcessAlive ? ', mantiene el proceso vivo' : ''})`)
   }
 
   /** Parada graciosa: deja de programar y ESPERA el tick en vuelo. */

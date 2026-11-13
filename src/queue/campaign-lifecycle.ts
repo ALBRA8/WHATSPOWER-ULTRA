@@ -106,3 +106,33 @@ export function transitionCampaignStatus(
 export function isDispatchableStatus(status: string): boolean {
   return status === 'RUNNING' || status === 'DRAFT'
 }
+
+/**
+ * (hallazgo 10, auditoría funcional 2026-11-12) REANUDACIÓN AUTOMÁTICA y
+ * CONDICIONAL de campañas pausadas EXCLUSIVAMENTE por enfriamiento cuyo
+ * cooldown DURABLE ya venció (campaigns.cooldown_started_at + cooldownMs).
+ *
+ * Garantías (probadas en wave2-fixes-h7-h10.test.ts):
+ *  - JAMÁS toca PAUSED (pausa MANUAL), PAUSED_OFF_HOURS ni estados terminales
+ *    (DRAFT/CANCELLED/COMPLETED/FAILED): la condición de la UPDATE es
+ *    status='PAUSED_COOLDOWN' AND cooldown_started_at NOT NULL vencido —
+ *    solo la pausa puesta por el propio throttler (con timestamp) es elegible.
+ *  - Atómica y multi-réplica segura: UPDATE condicional (changes cuenta).
+ *  - El worker llama esto en su mantenimiento por tick y reinicia el contador
+ *    de lote del Throttler si reanudó algo (el lote causante quedó consumido).
+ */
+export function resumeCooldownExpiredCampaigns(
+  db: DatabaseSync,
+  cooldownMs: number,
+  nowSec: number = Math.floor(Date.now() / 1000)
+): { resumed: number } {
+  const graceSec = Math.ceil(cooldownMs / 1000)
+  const res = db.prepare(`
+    UPDATE campaigns
+    SET status = 'RUNNING', cooldown_started_at = NULL
+    WHERE status = 'PAUSED_COOLDOWN'
+      AND cooldown_started_at IS NOT NULL
+      AND cooldown_started_at + ? <= ?
+  `).run(graceSec, nowSec)
+  return { resumed: Number(res.changes) }
+}

@@ -63,6 +63,19 @@ export class Throttler {
     return this.calculateNextInterval()
   }
 
+  /**
+   * (hallazgo 9, auditoría funcional 2026-11-12) ms que AÚN deben esperar para
+   * respetar minIntervalMs desde el último despacho SENT DURABLE de la
+   * organización (epoch segundos, de campaign_items.dispatched_at — sobrevive
+   * reinicios y limita a varias réplicas/colas de la misma org). 0 = puede
+   * despachar. El jitter (max) lo aporta nextPacingDelayMs al worker.
+   */
+  pacingDelayFor(lastDispatchAtSec: number | null | undefined, nowMs: number = Date.now()): number {
+    if (!lastDispatchAtSec || lastDispatchAtSec <= 0) return 0
+    const elapsed = nowMs - lastDispatchAtSec * 1000
+    return elapsed >= this.options.minIntervalMs ? 0 : this.options.minIntervalMs - elapsed
+  }
+
   isWithinBusinessHours(customDate?: Date): boolean {
     const now = customDate || new Date()
     // Obtener hora local de la zona configurada

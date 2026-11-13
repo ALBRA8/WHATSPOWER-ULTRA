@@ -69,6 +69,9 @@ const engine = new BroadcastEngine({
   suppressionStore: whatsPowerEnabled
     ? new CompositeSuppressionChecker(new LocalSuppressionStore(db), new Http2ASuppressionChecker())
     : new LocalSuppressionStore(db),
+  // (hallazgo 9) pacing DURABLE por organización activo en el worker de
+  // producción (WORKER_DISABLE_PACING=1 lo desactiva SOLO para laboratorio).
+  durablePacing: process.env.WORKER_DISABLE_PACING !== '1',
 })
 
 // Recuperación ante caídas ANTES de consumir (ítems transitorios de una
@@ -85,6 +88,13 @@ const worker = new PersistentBroadcastWorker({
   maxCampaignsPerTick: Number(process.env.WORKER_MAX_CAMPAIGNS || 20),
   staleClaimSeconds: Number(process.env.WORKER_STALE_SECONDS || 900),
   logger: (line) => console.log(line),
+  // (hallazgo 7) el proceso worker PERMANECE VIVO: el timer del bucle queda
+  // referenciado hasta la parada graciosa (SIGTERM/SIGINT). Sin esto el proceso
+  // podía terminar inmediatamente tras arrancar (timer unref + sin otros refs).
+  keepProcessAlive: true,
+  // (hallazgo 9) el worker respeta el pacing entre despachos (interrumpible
+  // SOLO para laboratorio con WORKER_DISABLE_PACING=1).
+  respectPacing: process.env.WORKER_DISABLE_PACING !== '1',
 })
 
 console.log(`[worker 2B] proceso persistente ULTRA iniciado (transporte=${useMetaCloud ? 'meta_cloud POR ORGANIZACIÓN' : 'crm_daemon'}, db=${process.env.BROADCAST_DB_PATH || '<repo>/db/broadcast.db'})`)

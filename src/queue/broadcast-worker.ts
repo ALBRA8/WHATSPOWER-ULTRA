@@ -11,7 +11,7 @@ import { parseAudienceCsv } from '../audiences/csv-importer.ts'
 import { renderSpintax } from '../engine/spintax.ts'
 import { FatigueManager, LocalSuppressionStore } from '../safety/suppression.ts'
 import { Throttler, type ThrottlerOptions } from './throttler.ts'
-import { isDispatchableStatus } from './campaign-lifecycle.ts'
+import { isDispatchableStatus, transitionCampaignStatus, resumeCooldownExpiredCampaigns } from './campaign-lifecycle.ts'
 
 export interface CreateCampaignOptions {
   organizationId: string
@@ -64,6 +64,11 @@ export class BroadcastEngine {
   /** Identidad única de este worker — queda registrada en campaign_items.claimed_by. */
   readonly workerId: string
 
+  /** (hallazgo 9) pacing DURABLE por organización activado (worker de producción). */
+  readonly durablePacing: boolean
+  private nowMs: () => number
+  private readonly claimLeaseRenewIntervalMs: number
+
   constructor(options: {
     db: DatabaseSync
     dispatcher: Dispatcher
@@ -71,6 +76,13 @@ export class BroadcastEngine {
     suppressionStore?: SuppressionChecker
     throttlerOptions?: Partial<ThrottlerOptions>
     workerId?: string
+    /** (hallazgo 9) activa el pacing durable por organización (default false
+     *  por compatibilidad; worker-main lo activa en producción). */
+    durablePacing?: boolean
+    /** Reloj inyectable (pruebas con reloj controlado, sin esperas reales). */
+    nowMs?: () => number
+    /** Intervalo de renovación del lease durante un despacho en vuelo. */
+    claimLeaseRenewIntervalMs?: number
   }) {
     this.db = options.db
     this.dispatcher = options.dispatcher
@@ -79,6 +91,19 @@ export class BroadcastEngine {
     this.fatigueManager = new FatigueManager(this.db)
     this.throttler = new Throttler(options.throttlerOptions)
     this.workerId = options.workerId || `wrk_${randomUUID()}`
+    this.durablePacing = options.durablePacing ?? false
+    this.nowMs = options.nowMs ?? (() => Date.now())
+    this.claimLeaseRenewIntervalMs = Math.max(1000, options.claimLeaseRenewIntervalMs ?? 60_000)
+  }
+
+  /** (hallazgo 8/9) libera un claim DISPATCHING devolviendo el ítem a PENDING
+   *  (inverso EXACTO del claim atómico: sin efectos externos realizados). */
+  private releaseClaim(itemId: string): void {
+    this.db.prepare(`
+      UPDATE campaign_items
+      SET status = 'PENDING', claimed_by = NULL, claimed_at = NULL
+      WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+    `).run(itemId, this.workerId)
   }
 
   /**
@@ -242,22 +267,30 @@ export class BroadcastEngine {
   /**
    * Ejecuta un paso de despacho del siguiente ítem PENDING de la campaña
    */
-  async processNextItem(campaignId: string, customDate?: Date): Promise<{ processed: boolean; status?: string; error?: string }> {
+  async processNextItem(campaignId: string, customDate?: Date): Promise<{ processed: boolean; status?: string; error?: string; retryAfterMs?: number }> {
     const campaign = this.getCampaign(campaignId)
     // (reparación integral) PAUSED tampoco puede despachar: la pausa debe respetarse.
     if (!campaign || ['COMPLETED', 'CANCELLED', 'PAUSED', 'PAUSED_OFF_HOURS', 'PAUSED_COOLDOWN'].includes(campaign.status)) {
       return { processed: false, status: campaign?.status }
     }
 
-    // A. Validación de Horario Comercial
+    // A. Validación de Horario Comercial — (hallazgo 10) transición CONDICIONAL
+    //    por la máquina de estados (jamás UPDATE ciego: una campaña cancelada
+    //    durante los chequeos no se "resucita" a PAUSED_*).
     if (!this.throttler.isWithinBusinessHours(customDate)) {
-      this.db.prepare("UPDATE campaigns SET status = 'PAUSED_OFF_HOURS' WHERE id = ?").run(campaignId)
+      const tr = transitionCampaignStatus(this.db, campaignId, campaign.organizationId, 'PAUSED_OFF_HOURS')
+      if (!tr.ok) return { processed: false, status: tr.from ?? campaign.status, error: 'Fuera de horario comercial permitido (transición no aplicada)' }
       return { processed: false, status: 'PAUSED_OFF_HOURS', error: 'Fuera de horario comercial permitido' }
     }
 
-    // B. Validación de Pausa de Enfriamiento por Lotes
+    // B. Validación de Pausa de Enfriamiento por Lotes — (hallazgo 10) transición
+    //    CONDICIONAL + timestamp DURABLE (cooldown_started_at) para que la
+    //    reanudación automática respete la expiración real del cooldown incluso
+    //    tras reiniciar el proceso.
     if (this.throttler.isCooldownNeeded()) {
-      this.db.prepare("UPDATE campaigns SET status = 'PAUSED_COOLDOWN' WHERE id = ?").run(campaignId)
+      const pausedAt = Math.floor(this.nowMs() / 1000)
+      const tr = transitionCampaignStatus(this.db, campaignId, campaign.organizationId, 'PAUSED_COOLDOWN', { cooldown_started_at: pausedAt })
+      if (!tr.ok) return { processed: false, status: tr.from ?? campaign.status, error: 'Enfriamiento por lote (transición no aplicada)' }
       return { processed: false, status: 'PAUSED_COOLDOWN', error: 'En pausa de enfriamiento por lote' }
     }
 
@@ -303,6 +336,22 @@ export class BroadcastEngine {
     }
     const nextItem = claim.item as any
 
+    // Lease renovable durante TODA la vida del claim (chequeos asíncronos
+    // previos y despacho). El timer se auto-detiene cuando la fila deja de
+    // pertenecer a este worker; la condición evita resucitar claims reconciliados.
+    const leaseTimer = setInterval(() => {
+      try {
+        const renewed = this.db.prepare(`
+          UPDATE campaign_items SET claimed_at = ?
+          WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+        `).run(Math.floor(this.nowMs() / 1000), nextItem.id, this.workerId)
+        if (Number(renewed.changes) !== 1) clearInterval(leaseTimer)
+      } catch (err) {
+        console.error('[broadcast-worker] No se pudo renovar lease del claim', err)
+      }
+    }, this.claimLeaseRenewIntervalMs)
+    leaseTimer.unref?.()
+
     // Marcar como RUNNING si estaba DRAFT — CONDICIONAL: si la campaña fue
     // cancelada/pausada durante el claim, el UPDATE no aplica (guard de estado).
     if (campaign.status === 'DRAFT') {
@@ -318,21 +367,25 @@ export class BroadcastEngine {
     try {
       const isSupp = await this.suppressionStore.isSuppressed(phone, campaign.organizationId)
       if (isSupp) {
-        this.db.prepare(`
+        // (hallazgo 8) transición con OWNERSHIP: solo el dueño del claim move la
+        // fila; el contador SOLO cambia si la fila REALMENTE transitó.
+        const up = this.db.prepare(`
           UPDATE campaign_items
           SET status = 'SUPPRESSED', error_reason = 'Baja / Opt-out detectada Just-In-Time'
-          WHERE id = ?
-        `).run(nextItem.id)
+          WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+        `).run(nextItem.id, this.workerId)
+        if (Number(up.changes) !== 1) return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
         this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
         return { processed: true, status: 'SUPPRESSED' }
       }
     } catch (suppErr: any) {
       // Fail-closed estricto si falla la verificación de supresión
-      this.db.prepare(`
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'SKIPPED_SUPPRESSION_UNAVAILABLE', error_reason = ?
-        WHERE id = ?
-      `).run(`Error consultando supresiones (Fail-Closed): ${suppErr.message}`, nextItem.id)
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(`Error consultando supresiones (Fail-Closed): ${suppErr.message}`, nextItem.id, this.workerId)
+      if (Number(up.changes) !== 1) return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
       this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: 'SKIPPED_SUPPRESSION_UNAVAILABLE' }
     }
@@ -344,21 +397,24 @@ export class BroadcastEngine {
     if (!lockRes.available) {
       // 1. Si Capa 2A reporta lock activo: se aborta el despacho
       if (lockRes.state) {
-        this.db.prepare(`
+        // (hallazgo 8) transición con OWNERSHIP + contador condicional.
+        const up = this.db.prepare(`
           UPDATE campaign_items
           SET status = 'ABORTED_LOCK_ACTIVE', lock_checked_at = ?, error_reason = ?
-          WHERE id = ?
-        `).run(checkNow, `Lock activo en 2A (${lockRes.state}) detectado Just-In-Time`, nextItem.id)
+          WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+        `).run(checkNow, `Lock activo en 2A (${lockRes.state}) detectado Just-In-Time`, nextItem.id, this.workerId)
+        if (Number(up.changes) !== 1) return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
         this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
         return { processed: true, status: 'ABORTED_LOCK_ACTIVE' }
       }
 
       // 2. Fail-Closed estricto: si 2A dio error o timeout, NUNCA despachar
-      this.db.prepare(`
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'SKIPPED_LOCK_UNAVAILABLE', lock_checked_at = ?, error_reason = ?
-        WHERE id = ?
-      `).run(checkNow, lockRes.error || 'Servicio de locks 2A no disponible (Fail-Closed)', nextItem.id)
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(checkNow, lockRes.error || 'Servicio de locks 2A no disponible (Fail-Closed)', nextItem.id, this.workerId)
+      if (Number(up.changes) !== 1) return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
       this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: 'SKIPPED_LOCK_UNAVAILABLE' }
     }
@@ -381,12 +437,15 @@ export class BroadcastEngine {
     // aborta SIN enviar y se libera el cómputo.
     const freshCampaign = this.db.prepare('SELECT status, organization_id FROM campaigns WHERE id = ?').get(campaignId) as { status: string; organization_id: string } | undefined
     if (!freshCampaign || !isDispatchableStatus(freshCampaign.status)) {
-      this.db.prepare(`
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'ABORTED_CAMPAIGN_NOT_RUNNING', error_reason = ?
         WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
       `).run(`Campaña en estado ${freshCampaign?.status ?? 'inexistente'} al momento del despacho (pausa/cancelación respetadas)`, nextItem.id, this.workerId)
-      this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      // (hallazgo 8) contador condicional: solo si la fila transitó.
+      if (Number(up.changes) === 1) {
+        this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      }
       return { processed: true, status: 'ABORTED_CAMPAIGN_NOT_RUNNING' }
     }
 
@@ -398,7 +457,7 @@ export class BroadcastEngine {
     // despacho, jamás reintento automático).
     const freshItemOrg = this.db.prepare('SELECT organization_id FROM campaign_items WHERE id = ?').get(nextItem.id) as { organization_id: string | null } | undefined
     if (!freshItemOrg?.organization_id || freshItemOrg.organization_id !== freshCampaign.organization_id) {
-      this.db.prepare(`
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'QUARANTINED_NO_ORG', error_reason = ?
         WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
@@ -407,8 +466,32 @@ export class BroadcastEngine {
         nextItem.id,
         this.workerId
       )
-      this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      if (Number(up.changes) === 1) {
+        this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      }
       return { processed: true, status: 'QUARANTINED_NO_ORG' }
+    }
+
+    // F0-ter. (hallazgo 9) PACING DURABLE POR ORGANIZACIÓN: el último despacho
+    // SENT de ESTA organización (cualquier campaña y CUALQUIER réplica/cola,
+    // vía campaign_items.dispatched_at) debe tener al menos minIntervalMs.
+    // NO bloquea el procesamiento: informa PACING_DELAY con retryAfterMs — el
+    // worker espera el tiempo indicado y reintenta; así reintentos ni varias
+    // réplicas pueden evadir el intervalo mínimo.
+    if (this.durablePacing) {
+      const lastRow = this.db.prepare(`
+        SELECT MAX(ci.dispatched_at) AS last_at
+        FROM campaign_items ci
+        JOIN campaigns c ON c.id = ci.campaign_id
+        WHERE c.organization_id = ?
+      `).get(freshCampaign.organization_id) as { last_at: number | null }
+      const waitMs = this.throttler.pacingDelayFor(lastRow?.last_at ?? null, this.nowMs())
+      if (waitMs > 0) {
+        // (hallazgo 9) el claim se LIBERA: el ítem vuelve a PENDING (nadie lo
+        // despachó) — jamás queda bloqueado en DISPATCHING por un pacing.
+        this.releaseClaim(nextItem.id)
+        return { processed: false, status: 'PACING_DELAY', error: `Pacing por organización activo (faltan ${waitMs} ms)`, retryAfterMs: waitMs }
+      }
     }
 
     // F. El ítem ya está en DISPATCHING desde el claim atómico; se registran
@@ -422,15 +505,27 @@ export class BroadcastEngine {
     // G. Despacho a través de la Interfaz del CRM
     // B3: el despacho NOMBRA la organización de la campaña (identidad extremo a extremo).
     const dispatchRes = await this.dispatcher.dispatch(phone, renderedText, campaign.organizationId)
-    const dispatchTime = Math.floor(Date.now() / 1000)
+    const dispatchTime = Math.floor(this.nowMs() / 1000)
 
     if (dispatchRes.success) {
-      // Guard: solo el worker que reclama escribe el resultado (multi-réplica seguro)
-      this.db.prepare(`
+      // Guard: solo el worker que reclama escribe el resultado (multi-réplica seguro).
+      // (hallazgo 8) el CONTADOR (y fatiga/pacing) SOLO se actualiza si la
+      // transición afectó REALMENTE la fila: en finalización tardía (claim ya
+      // reconciliado por otro proceso, p.ej. despacho >900s con evento pausado)
+      // la fila está en UNCERTAIN_DISPATCH — exige resolución humana, jamás se
+      // contabiliza como SENT ni se duplica la entrega por otro camino.
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'SENT', dispatched_at = ?, message_id = ?
         WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
       `).run(dispatchTime, dispatchRes.messageId || null, nextItem.id, this.workerId)
+
+      if (Number(up.changes) !== 1) {
+        console.warn(
+          `[broadcast-worker] CLAIM_LOST en finalización de despacho (ítem=${nextItem.id}, worker=${this.workerId}): el claim fue reconciliado durante el despacho — sin doble contabilización ni reenvío; la fila exige reconciliación humana`
+        )
+        return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
+      }
 
       this.db.prepare('UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ?').run(campaignId)
       this.fatigueManager.recordBroadcast(phone, campaignId, campaign.organizationId)
@@ -440,14 +535,18 @@ export class BroadcastEngine {
     } else if (dispatchRes.uncertain) {
       // RESULTADO INCIERTO (timeout / desconexión): el daemon pudo haber enviado el mensaje.
       // REGLA OBLIGATORIA: Bloquear reintentos automáticos a ciegas para impedir duplicidad en WhatsApp.
-      this.db.prepare(`
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'UNCERTAIN_DISPATCH', error_reason = ?
         WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
       `).run(dispatchRes.error || 'Resultado incierto de despacho (Requiere reconciliación previa)', nextItem.id, this.workerId)
 
-      this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
-      return { processed: true, status: 'UNCERTAIN_DISPATCH', error: dispatchRes.error }
+      // (hallazgo 8) contador condicional: sin doble contabilización si el claim se perdió.
+      if (Number(up.changes) === 1) {
+        this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
+        return { processed: true, status: 'UNCERTAIN_DISPATCH', error: dispatchRes.error }
+      }
+      return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
     } else {
       // Fallo confirmado por el daemon / transport:
       // Si el fallo es permanente (rechazo 4xx, credencial inválida, etc.), no reintentar a ciegas.
@@ -455,14 +554,18 @@ export class BroadcastEngine {
       const isRetryable = !isPermanent && nextItem.retryCount < 2
       const newStatus = isRetryable ? 'FAILED_RETRYABLE' : 'FAILED_FATAL'
 
-      this.db.prepare(`
+      const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = ?, error_reason = ?, retry_count = retry_count + 1
         WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
       `).run(newStatus, dispatchRes.error || 'Fallo de despacho saliente confirmado', nextItem.id, this.workerId)
 
-      this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
-      return { processed: true, status: newStatus, error: dispatchRes.error }
+      // (hallazgo 8) contador condicional: sin doble contabilización si el claim se perdió.
+      if (Number(up.changes) === 1) {
+        this.db.prepare('UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?').run(campaignId)
+        return { processed: true, status: newStatus, error: dispatchRes.error }
+      }
+      return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
     }
   }
 
@@ -537,13 +640,28 @@ export class BroadcastEngine {
   }
 
   /**
+   * (hallazgo 10) Reanudación AUTOMÁTICA de campañas pausadas EXCLUSIVAMENTE
+   * por cooldown DURABLE vencido. Solo toca PAUSED_COOLDOWN con timestamp
+   * vencido (jamás pausas manuales ni estados terminales). Si reanudó algo,
+   * reinicia el contador de lote del Throttler (el lote causante ya consumió
+   * su cooldown): sin esto, isCooldownNeeded() seguiría true y nada avanzaría.
+   */
+  resumeCooldownExpiredCampaigns(): { resumed: number } {
+    const res = resumeCooldownExpiredCampaigns(this.db, this.throttler.options.cooldownMs)
+    if (res.resumed > 0) {
+      this.throttler.resetCooldown()
+    }
+    return res
+  }
+
+  /**
    * Reconciliación CONTROLADA (nunca reintento ciego):
    * mueve a UNCERTAIN_DISPATCH los ítems DISPATCHING con claims expirados
    * (worker muerto sin pasar por recoverFromCrash). No los devuelve a PENDING jamás;
    * exigen resolución humana o del proceso de reconciliación autorizado.
    */
   reconcileStaleClaims(maxAgeSeconds: number = 900): { reconciledCount: number } {
-    const cutoff = Math.floor(Date.now() / 1000) - maxAgeSeconds
+    const cutoff = Math.floor(this.nowMs() / 1000) - maxAgeSeconds
     const res = this.db.prepare(`
       UPDATE campaign_items
       SET status = 'UNCERTAIN_DISPATCH',
@@ -585,7 +703,7 @@ export class BroadcastEngine {
     // (reparación integral) Solo los claims EXPIRIDOS o huérfanos (claimed_at nulo de
     // migraciones viejas) se marcan UNCERTAIN_DISPATCH; los ítems en vuelo de workers
     // vivos (claim reciente) NO se tocan al arrancar otra réplica.
-    const staleCutoff = Math.floor(Date.now() / 1000) - 900
+    const staleCutoff = Math.floor(this.nowMs() / 1000) - 900
     const result = this.db.prepare(`
       UPDATE campaign_items
       SET status = 'UNCERTAIN_DISPATCH', error_reason = 'Proceso interrumpido durante despacho (Resultado Incierto - Bloqueado contra reenvío ciego)'
