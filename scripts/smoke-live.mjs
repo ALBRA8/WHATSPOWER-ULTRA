@@ -106,13 +106,13 @@ async function main() {
   const { fileURLToPath } = await import('node:url')
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
   const db = new DatabaseSync(join(repoRoot, 'db', 'broadcast.db'))
-  db.exec(`
-    DELETE FROM campaign_items WHERE campaign_id IN (SELECT id FROM campaigns WHERE name LIKE 'SMOKE-%');
-    DELETE FROM campaigns WHERE name LIKE 'SMOKE-%';
-  `)
-  const leftover = db.prepare("SELECT COUNT(*) AS n FROM campaigns WHERE name LIKE 'SMOKE-%'").get()
+  // Cleanup estrictamente acotado a la campaña creada por ESTA ejecución.
+  // Nunca borrar otras campañas con prefijo SMOKE de otra prueba/organización.
+  db.prepare('DELETE FROM campaign_items WHERE campaign_id = ?').run(camp.id)
+  db.prepare('DELETE FROM campaigns WHERE id = ?').run(camp.id)
+  const leftover = db.prepare('SELECT COUNT(*) AS n FROM campaigns WHERE id = ?').get(camp.id)
   db.close()
-  check('T10 cleanup campañas smoke', leftover.n === 0)
+  check('T10 cleanup campaña smoke propia', leftover.n === 0)
 
   console.log('============================================================')
   console.log(`  RESULTADO: ${passed} PASS / ${failed} FAIL`)
