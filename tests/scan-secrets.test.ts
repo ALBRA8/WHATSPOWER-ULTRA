@@ -1087,4 +1087,78 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     assert.throws(() => filterAllowlist([findingA], [badAllowlist[0]]), /'matchPrefix' es obligatorio/)
     assert.throws(() => filterAllowlist([findingB], [badAllowlist[1]]), /'synthetic' es obligatorio/)
   })
+
+  it('AUDIT-24 (ALLOWLIST-RAW-FAILCLOSED): filterAllowlist retiene en kept si raw falta, es null, no es string, está vacío o no coincide', () => {
+    const validRule: AllowlistEntry[] = [
+      {
+        file: 'tests/fixture.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: '112233445566',
+        matchPrefix: 'test_internal_secret_',
+        synthetic: true,
+        reason: 'Regla válida con prefijo sintético estricto',
+      },
+    ]
+
+    const baseFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: 'tests/fixture.ts',
+      line: 5,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: '112233445566',
+    }
+
+    // 1. raw falta (undefined)
+    const fMissing: any = { ...baseFinding }
+    delete fMissing.raw
+    const resMissing = filterAllowlist([fMissing], validRule)
+    assert.strictEqual(resMissing.kept.length, 1, 'raw undefined debe permanecer en kept')
+    assert.strictEqual(resMissing.excluded.length, 0, 'raw undefined jamás debe excluirse')
+
+    // 2. raw es null
+    const fNull: any = { ...baseFinding, raw: null }
+    const resNull = filterAllowlist([fNull], validRule)
+    assert.strictEqual(resNull.kept.length, 1, 'raw null debe permanecer en kept')
+    assert.strictEqual(resNull.excluded.length, 0, 'raw null jamás debe excluirse')
+
+    // 3. raw no es string (número, boolean, objeto)
+    const fNum: any = { ...baseFinding, raw: 1234567890 }
+    const resNum = filterAllowlist([fNum], validRule)
+    assert.strictEqual(resNum.kept.length, 1, 'raw numérico debe permanecer en kept')
+    assert.strictEqual(resNum.excluded.length, 0, 'raw numérico jamás debe excluirse')
+
+    const fBool: any = { ...baseFinding, raw: true }
+    const resBool = filterAllowlist([fBool], validRule)
+    assert.strictEqual(resBool.kept.length, 1, 'raw booleano debe permanecer en kept')
+    assert.strictEqual(resBool.excluded.length, 0, 'raw booleano jamás debe excluirse')
+
+    const fObj: any = { ...baseFinding, raw: {} }
+    const resObj = filterAllowlist([fObj], validRule)
+    assert.strictEqual(resObj.kept.length, 1, 'raw objeto debe permanecer en kept')
+    assert.strictEqual(resObj.excluded.length, 0, 'raw objeto jamás debe excluirse')
+
+    // 4. raw está vacío ("") o sólo espacios ("   ")
+    const fEmpty: any = { ...baseFinding, raw: '' }
+    const resEmpty = filterAllowlist([fEmpty], validRule)
+    assert.strictEqual(resEmpty.kept.length, 1, 'raw vacío debe permanecer en kept')
+    assert.strictEqual(resEmpty.excluded.length, 0, 'raw vacío jamás debe excluirse')
+
+    const fSpaces: any = { ...baseFinding, raw: '   ' }
+    const resSpaces = filterAllowlist([fSpaces], validRule)
+    assert.strictEqual(resSpaces.kept.length, 1, 'raw espacios debe permanecer en kept')
+    assert.strictEqual(resSpaces.excluded.length, 0, 'raw espacios jamás debe excluirse')
+
+    // 5. raw no coincide con el prefijo
+    const fMismatch: any = { ...baseFinding, raw: ['prod_unauthorized', 'secret_value_12345'].join('_') } // scan-secrets:allow
+    const resMismatch = filterAllowlist([fMismatch], validRule)
+    assert.strictEqual(resMismatch.kept.length, 1, 'raw sin prefijo debe permanecer en kept')
+    assert.strictEqual(resMismatch.excluded.length, 0, 'raw sin prefijo jamás debe excluirse')
+
+    // 6. Contracomprobación positiva: raw válido que sí coincide con matchPrefix
+    const fValid: any = { ...baseFinding, raw: 'test_internal_secret_value_12345' }
+    const resValid = filterAllowlist([fValid], validRule)
+    assert.strictEqual(resValid.kept.length, 0, 'hallazgo legítimo debe salir de kept')
+    assert.strictEqual(resValid.excluded.length, 1, 'hallazgo legítimo debe autorizarse en excluded')
+  })
 })

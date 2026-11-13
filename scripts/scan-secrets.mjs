@@ -205,14 +205,22 @@ export function filterAllowlist(findings, allowlistOrPath) {
     )
 
     if (match) {
-      // Criterio de autorización estricto y obligatorio:
-      // matchPrefix obligatorio y synthetic === true; el hallazgo debe comenzar con matchPrefix
-      if (
-        match.synthetic !== true ||
-        typeof match.matchPrefix !== 'string' ||
-        !match.matchPrefix.trim() ||
-        (f.raw && !f.raw.startsWith(match.matchPrefix))
-      ) {
+      // Criterio de autorización estricto fail-closed:
+      // 1. match.synthetic === true
+      // 2. match.matchPrefix debe ser string no vacío
+      // 3. f.raw debe ser obligatoriamente un string no vacío
+      // 4. f.raw debe comenzar estrictamente con match.matchPrefix
+      const hasValidRule =
+        match.synthetic === true &&
+        typeof match.matchPrefix === 'string' &&
+        match.matchPrefix.trim().length > 0
+
+      const hasValidRawMatch =
+        typeof f.raw === 'string' &&
+        f.raw.trim().length > 0 &&
+        f.raw.startsWith(match.matchPrefix)
+
+      if (!hasValidRule || !hasValidRawMatch) {
         kept.push(f)
         continue
       }
