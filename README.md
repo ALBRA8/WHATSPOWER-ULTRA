@@ -62,8 +62,11 @@ WHATSAPP_DAEMON_URL=http://localhost:3002
 INTERNAL_API_SECRET=<secreto-compartido-minimo-24-caracteres>  # generar valor propio; nunca reutilizar valores publicados
 AGENTIC_2A_URL=http://localhost:3003
 WHATSPOWER_ENABLED=true    # true para Suite Completa, false para Standalone con solo CRM
+WHATSPOWER_ORG_CREDENTIALS=<orgId>:<credencial-de-servicio>
 ALLOW_REAL_DISPATCH=false  # Salvaguarda física: false para simulación, true solo en producción autorizada
 ```
+
+**Credencial de WHATSPOWER:** `WHATSPOWER_ORG_CREDENTIALS` debe contener los mismos pares `orgId:credencial` que `ORG_SERVICE_CREDENTIALS` en WHATSPOWER. Genera una credencial aleatoria independiente por organización; no reutilices `INTERNAL_API_SECRET` ni `CRM_INTERNAL_CREDENTIALS`. Sin credencial coincidente, la consulta JIT de locks falla de forma segura y Ultra no despacha. Mantén `ALLOW_REAL_DISPATCH=false` durante las pruebas.
 
 ### 3. Ejecutar el Servidor y Campaign Studio
 ```bash
