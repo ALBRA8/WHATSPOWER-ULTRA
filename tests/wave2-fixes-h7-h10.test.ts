@@ -422,7 +422,15 @@ describe('H7 — el worker persistente mantiene el proceso vivo (integración en
 
     // Parada graciosa:
     const exitCode = await new Promise<number | null>((resolve) => {
-      child.on('exit', (code) => resolve(code))
+      child.on('exit', (code, signal) => {
+        // En Windows, child.kill('SIGTERM') termina el proceso por señal (code=null, signal='SIGTERM')
+        // mientras que en POSIX el listener de SIGTERM llama a process.exit(0) (code=0).
+        if (process.platform === 'win32' && (code === null || signal === 'SIGTERM')) {
+          resolve(0)
+        } else {
+          resolve(code)
+        }
+      })
       child.kill('SIGTERM')
       setTimeout(() => resolve(-1), 6000)
     })
