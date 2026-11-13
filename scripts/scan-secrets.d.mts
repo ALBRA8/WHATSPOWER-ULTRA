@@ -19,8 +19,8 @@ export interface AllowlistEntry {
   category: string
   fingerprint: string
   reason: string
-  matchPrefix?: string
-  synthetic?: boolean
+  matchPrefix: string
+  synthetic: true
 }
 
 export interface BaselineEntry {

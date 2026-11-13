@@ -133,11 +133,11 @@ export function validateAllowlist(entries) {
     if (typeof e.reason !== 'string' || !e.reason.trim()) {
       throw new Error(`Allowlist entrada #${i} inválida: 'reason' es obligatoria y debe justificar la excepción`)
     }
-    if (e.matchPrefix !== undefined && (typeof e.matchPrefix !== 'string' || !e.matchPrefix.trim())) {
-      throw new Error(`Allowlist entrada #${i} inválida: 'matchPrefix' debe ser una cadena no vacía`)
+    if (typeof e.matchPrefix !== 'string' || !e.matchPrefix.trim()) {
+      throw new Error(`Allowlist entrada #${i} inválida: 'matchPrefix' es obligatorio y debe ser una cadena no vacía (fail-closed)`)
     }
-    if (e.synthetic !== undefined && typeof e.synthetic !== 'boolean') {
-      throw new Error(`Allowlist entrada #${i} inválida: 'synthetic' debe ser un booleano`)
+    if (e.synthetic !== true) {
+      throw new Error(`Allowlist entrada #${i} inválida: 'synthetic' es obligatorio y debe ser estrictamente true (fail-closed)`)
     }
   }
   return true
@@ -205,9 +205,14 @@ export function filterAllowlist(findings, allowlistOrPath) {
     )
 
     if (match) {
-      // Criterio de autorización estricto y verificable:
-      // Si la regla define un matchPrefix, el hallazgo debe contener ese prefijo sintético
-      if (match.matchPrefix && f.raw && !f.raw.startsWith(match.matchPrefix)) {
+      // Criterio de autorización estricto y obligatorio:
+      // matchPrefix obligatorio y synthetic === true; el hallazgo debe comenzar con matchPrefix
+      if (
+        match.synthetic !== true ||
+        typeof match.matchPrefix !== 'string' ||
+        !match.matchPrefix.trim() ||
+        (f.raw && !f.raw.startsWith(match.matchPrefix))
+      ) {
         kept.push(f)
         continue
       }

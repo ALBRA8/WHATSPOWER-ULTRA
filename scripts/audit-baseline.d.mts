@@ -15,6 +15,7 @@ export interface AuditResult {
   orphanedAllowlistEntries: any[]
 }
 
+export function isDeliberatelySyntheticValue(val: string): boolean
 export function verifySyntheticEvidence(entry: any, blobContent: string, detectedFindings: any[]): boolean
 
 export function auditBaseline(options?: {

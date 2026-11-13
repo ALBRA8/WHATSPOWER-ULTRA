@@ -38,9 +38,63 @@ import {
 } from './scan-secrets.mjs'
 
 /**
- * Valida que un hallazgo sintético cuente con evidencia verificable tanto en el token
- * como en la estructura circundante del código (arnés de pruebas, aserciones, etc.).
- * Prohibido clasificar como sintético por simple ruta de archivo.
+ * Comprueba si un valor de secreto detectado es demostrablemente sintético y deliberadamente ficticio.
+ * La evidencia DEBE estar intrínsecamente ligada al valor del token, impidiendo que palabras
+ * genéricas como "test", "rotation" o números comunes en el archivo clasifiquen accidentalmente un secreto real.
+ */
+export function isDeliberatelySyntheticValue(val) {
+  if (!val || typeof val !== 'string') return false
+  const v = val.trim()
+
+  // 1. Prefijos y patrones de prueba deliberados en este proyecto
+  const DELIBERATE_SYNTHETIC_PREFIXES = [
+    'test_internal_secret_',
+    'wrong_secret_',
+    'daemon_secret_',
+    'secreto-servicio-',
+    'secreto-otro-',
+    'secreto_compartido_tests_',
+    'clave_org_',
+    'clave_erronea_',
+    'ultra_test_',
+    'ultra_t3_',
+    ['EAAG', 'token_ficticio_'].join('_'),
+    ['EAAG', 'token_global_ignorado'].join('_'),
+  ]
+  if (DELIBERATE_SYNTHETIC_PREFIXES.some((prefix) => v.startsWith(prefix))) {
+    return true
+  }
+
+  // 2. Marcadores ficticios explícitos dentro del propio valor
+  if (
+    /dummy/i.test(v) ||
+    /ficticio/i.test(v) ||
+    /ignorado/i.test(v) ||
+    /superSecretToken/i.test(v) ||
+    /placeholder/i.test(v)
+  ) {
+    return true
+  }
+
+  // 3. Estructuras de documentación oficiales y secuencias repetitivas evidentes
+  if (v === ['AKIA', 'IOSFODNN7EXAMPLE'].join('')) return true
+  if (v === ['-----BEGIN RSA', 'PRIVATE KEY'].join(' ') || v === ['-----BEGIN', 'PRIVATE KEY'].join(' ')) return true
+  // - JWT con payload de prueba estándar 'John Doe' (jwt.io)
+  if (v.startsWith('eyJ') && v.includes('eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0')) return true
+  if (
+    v === 'proj-' ||
+    v === ['ghp', '123456789012345678901234567890123456'].join('_') ||
+    v === ['EAAG', '1234567890abcdef1234567890'].join('')
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Valida que un hallazgo sintético cuente con evidencia verificable vinculada al valor detectado.
+ * Prohibido clasificar por mera coincidencia de palabras genéricas en el archivo o contexto.
  */
 export function verifySyntheticEvidence(entry, blobContent, detectedFindings) {
   if (entry.status !== 'synthetic-test-fixture') {
@@ -49,40 +103,25 @@ export function verifySyntheticEvidence(entry, blobContent, detectedFindings) {
   if (!blobContent || typeof blobContent !== 'string') {
     return false
   }
-
-  const SYNTHETIC_TOKEN_HINTS = [
-    /dummy/i, /test/i, /mock/i, /placeholder/i, /fake/i, /wrong/i,
-    /daemon_secret/i, /secreto-servicio/i, /secreto-otro/i, /EAAG_token_/i,
-    /ficticio/i, /ignorado/i, /sample/i, /1234567890/, /000000/,
-    /ultra_test_/i, /ultra_t3_/i, /secreto_compartido_tests/i,
-    /clave_/i, /erronea/i, /erroneo/i, /min16chars/i, /min24chars/i,
-  ]
-  const TEST_CONTEXT_HINTS = [
-    /\bdescribe\s*\(/, /\bit\s*\(/, /\btest\s*\(/, /\bexpect\s*\(/,
-    /\bassert\b/, /\bmockMode\b/, /\bbeforeEach\s*\(/, /\bafterEach\s*\(/,
-    /rotation/i, /synthetic/i,
-  ]
-
-  // Debe haber presencia demostrable de contexto de pruebas o arnés de validación
-  const hasTestContext = TEST_CONTEXT_HINTS.some((re) => re.test(blobContent))
-  if (!hasTestContext) return false
-
-  // Debe verificarse que los hallazgos contengan marcadores de fixtures sintéticos
-  for (const f of detectedFindings) {
-    if (f.raw && SYNTHETIC_TOKEN_HINTS.some((re) => re.test(f.raw))) {
-      return true
-    }
-    if (f.preview && SYNTHETIC_TOKEN_HINTS.some((re) => re.test(f.preview))) {
-      return true
-    }
+  if (!Array.isArray(detectedFindings) || detectedFindings.length === 0) {
+    return false
   }
 
-  // Buscar en las líneas específicas del blob donde se detectaron los hallazgos
-  const lines = blobContent.split('\n')
+  // 1. El archivo DEBE pertenecer a un contexto formal de prueba (ej. tests/ o arnés)
+  const hasTestHarness =
+    /\bdescribe\s*\(/.test(blobContent) ||
+    /\bit\s*\(/.test(blobContent) ||
+    /\btest\s*\(/.test(blobContent) ||
+    /\bexpect\s*\(/.test(blobContent) ||
+    /\bassert\b/.test(blobContent) ||
+    entry.file === 'scripts/security/secret-baseline.json'
+  if (!hasTestHarness) return false
+
+  // 2. La evidencia DEBE estar vinculada al valor detectado (f.raw).
+  // Se prohíbe clasificar como sintético por palabras genéricas como "test", "rotation" o números comunes
+  // en el texto circundante.
   for (const f of detectedFindings) {
-    const lineIdx = (f.line || 1) - 1
-    const contextRange = lines.slice(Math.max(0, lineIdx - 3), Math.min(lines.length, lineIdx + 4)).join('\n')
-    if (SYNTHETIC_TOKEN_HINTS.some((re) => re.test(contextRange))) {
+    if (f.raw && isDeliberatelySyntheticValue(f.raw)) {
       return true
     }
   }
@@ -347,8 +386,14 @@ export function auditBaseline(options = {}) {
           f.pattern === a.category &&
           f.fingerprint.toLowerCase() === a.fingerprint.toLowerCase()
         ) {
-          // Verificación de criterio estricto matchPrefix si está definido
-          if (!a.matchPrefix || (f.raw && f.raw.startsWith(a.matchPrefix))) {
+          // Criterio de autorización estricto y obligatorio: synthetic === true y matchPrefix no vacío
+          if (
+            a.synthetic === true &&
+            typeof a.matchPrefix === 'string' &&
+            a.matchPrefix.trim() &&
+            f.raw &&
+            f.raw.startsWith(a.matchPrefix)
+          ) {
             matchedAllowlistIndices.add(aIdx)
             authorized = true
           }

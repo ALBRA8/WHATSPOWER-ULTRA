@@ -19,7 +19,7 @@ import {
   type AllowlistEntry,
   type BaselineEntry,
 } from '../scripts/scan-secrets.mjs'
-import { auditBaseline, verifySyntheticEvidence } from '../scripts/audit-baseline.mjs'
+import { auditBaseline, verifySyntheticEvidence, isDeliberatelySyntheticValue } from '../scripts/audit-baseline.mjs'
 
 const SHA_VALID_A = '11223344556677889900aabbccddeeff00112233'
 const SHA_VALID_B = '1122334499887766554433221100ffeeddccbbaa' // comparte los primeros 8 chars con A
@@ -100,6 +100,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
         line: 10,
         preview: 'EAAG…(30 caracteres)',
         fingerprint: '112233445566',
+        raw: ['EAAG', 'token_dummy_1234567890'].join('_'),
       },
       {
         pattern: 'OPENAI_KEY',
@@ -108,6 +109,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
         line: 20,
         preview: 'sk-p…(40 caracteres)',
         fingerprint: 'aabbccddeeff',
+        raw: ['sk', 'proj', 'prodApiKey1234567890'].join('-'),
       },
     ]
 
@@ -116,6 +118,8 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
         file: 'tests/security-hardening.test.ts',
         category: 'META_TOKEN',
         fingerprint: '112233445566',
+        matchPrefix: 'EAAG_token_dummy',
+        synthetic: true,
         reason: 'Fixture autorizado',
       },
     ]
@@ -377,6 +381,8 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
         file: 'tests/foo.ts',
         category: 'CONFIG_SECRET',
         fingerprint: '112233445566',
+        matchPrefix: 'test_internal_secret',
+        synthetic: true,
         reason: 'Fixture legítimo',
       },
     ]
@@ -387,6 +393,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
       line: 5,
       preview: 'secr…(20 caracteres)',
       fingerprint: '112233445566',
+      raw: 'test_internal_secret_value1234',
     }
 
     const { kept, excluded } = filterAllowlist([finding], allowlistMock)
@@ -394,14 +401,88 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     assert.strictEqual(excluded.length, 0)
   })
 
-  it('SEC-FAIL-02: Allowlist con comodín o sin justificación es rechazada por validateAllowlist', () => {
+  it('SEC-FAIL-02: Allowlist con comodín, sin justificación o sin campos obligatorios es rechazada por validateAllowlist', () => {
     assert.throws(
-      () => validateAllowlist([{ file: '*', category: 'JWT', fingerprint: '112233445566', reason: 'excesivo' }]),
+      () =>
+        validateAllowlist([
+          {
+            file: '*',
+            category: 'JWT',
+            fingerprint: '112233445566',
+            matchPrefix: 'prefix',
+            synthetic: true,
+            reason: 'excesivo',
+          },
+        ]),
       /no comodín/
     )
     assert.throws(
-      () => validateAllowlist([{ file: 'tests/a.ts', category: 'JWT', fingerprint: '112233445566', reason: '' }]),
+      () =>
+        validateAllowlist([
+          {
+            file: 'tests/a.ts',
+            category: 'JWT',
+            fingerprint: '112233445566',
+            matchPrefix: 'prefix',
+            synthetic: true,
+            reason: '',
+          },
+        ]),
       /reason/
+    )
+    assert.throws(
+      () =>
+        validateAllowlist([
+          {
+            file: 'tests/a.ts',
+            category: 'JWT',
+            fingerprint: '112233445566',
+            reason: 'ok',
+            matchPrefix: '',
+            synthetic: true,
+          },
+        ]),
+      /'matchPrefix' es obligatorio y debe ser una cadena no vacía/
+    )
+    assert.throws(
+      () =>
+        validateAllowlist([
+          {
+            file: 'tests/a.ts',
+            category: 'JWT',
+            fingerprint: '112233445566',
+            reason: 'ok',
+            synthetic: true,
+          },
+        ]),
+      /'matchPrefix' es obligatorio y debe ser una cadena no vacía/
+    )
+    assert.throws(
+      () =>
+        validateAllowlist([
+          {
+            file: 'tests/a.ts',
+            category: 'JWT',
+            fingerprint: '112233445566',
+            reason: 'ok',
+            matchPrefix: 'validPrefix',
+            synthetic: false,
+          },
+        ]),
+      /'synthetic' es obligatorio y debe ser estrictamente true/
+    )
+    assert.throws(
+      () =>
+        validateAllowlist([
+          {
+            file: 'tests/a.ts',
+            category: 'JWT',
+            fingerprint: '112233445566',
+            reason: 'ok',
+            matchPrefix: 'validPrefix',
+          },
+        ]),
+      /'synthetic' es obligatorio y debe ser estrictamente true/
     )
   })
 
@@ -801,6 +882,8 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
         file: 'tests/historical-leak.test.ts',
         category: 'META_TOKEN',
         fingerprint: fp,
+        matchPrefix: 'EAAG',
+        synthetic: true,
         reason: 'Intento indebido de autorizar historial con allowlist',
       },
     ]
@@ -827,7 +910,7 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
   })
 
   it('AUDIT-20 (ALLOWLIST-PREFIX-01): Hallazgo que no cumple matchPrefix en allowlist es rechazado en filterAllowlist', () => {
-    const allowlist = [
+    const allowlist: AllowlistEntry[] = [
       {
         file: 'tests/contracts.test.ts',
         category: 'CONFIG_SECRET',
@@ -865,5 +948,143 @@ describe('SECRETS SCANNER: Validación Estricta de SHA Completo (40 chars) y Pru
     const res = filterAllowlist([findingMatch], allowlist)
     assert.strictEqual(res.kept.length, 0)
     assert.strictEqual(res.excluded.length, 1)
+  })
+
+  it('AUDIT-21 (SYNTHETIC-NEG-01): Secreto real en tests con palabras accidentales (test/rotation/numbers) es RECHAZADO como sintético', () => {
+    // Clave con apariencia real, sin marcadores deliberadamente sintéticos
+    const liveLookingApiKey = ['live', 'production', 'api', 'key', '4837294829104829'].join('_') // scan-secrets:allow
+    const fp = computeFingerprint(liveLookingApiKey)
+    const commit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+    const baseline = [
+      {
+        commit,
+        file: 'tests/accidental-context.test.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: fp,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+
+    // El archivo de pruebas incluye palabras genéricas 'test', 'rotation', 'mock', '1234567890' en el contexto
+    const fakeBlob = `
+      describe('integration suite test', () => {
+        // rotation schedule check with 1234567890 sample numbers
+        it('tests mock behavior', () => {
+          const secret = "${liveLookingApiKey}";
+          assert.ok(secret);
+        });
+      });
+    `
+
+    const finding = { raw: liveLookingApiKey, preview: mask(liveLookingApiKey), line: 5 }
+    assert.strictEqual(isDeliberatelySyntheticValue(liveLookingApiKey), false)
+    assert.strictEqual(verifySyntheticEvidence(baseline[0], fakeBlob, [finding]), false)
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('git show') && cmd.includes(':')) return fakeBlob
+      return ''
+    }
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: baseline,
+      scanHistory: false,
+      scanWorkingTree: false,
+    })
+
+    assert.strictEqual(result.synthetic.length, 0, 'No debe clasificarse como sintético')
+    assert.strictEqual(result.invalid.length, 1, 'Debe marcarse como INVALID')
+    assert.match(result.invalid[0].reason, /sin evidencia verificable/)
+  })
+
+  it('AUDIT-22 (SYNTHETIC-NEG-02): AWS Key con apariencia real en describe() es RECHAZADA (no es sintética)', () => {
+    const liveAwsKey = ['AKIA', '2B3C4D5E6F7G8H9I'].join('') // scan-secrets:allow
+    const fp = computeFingerprint(liveAwsKey)
+    const commit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+    const baseline = [
+      {
+        commit,
+        file: 'tests/aws.test.ts',
+        category: 'AWS_ACCESS_KEY',
+        fingerprint: fp,
+        status: 'synthetic-test-fixture',
+        rotation: 'none',
+      },
+    ]
+
+    const fakeBlob = `
+      describe('aws client tests', () => {
+        it('tests upload with secret rotation', () => {
+          const accessKey = "${liveAwsKey}";
+        });
+      });
+    `
+
+    const finding = { raw: liveAwsKey, preview: mask(liveAwsKey), line: 4 }
+    assert.strictEqual(isDeliberatelySyntheticValue(liveAwsKey), false)
+    assert.strictEqual(verifySyntheticEvidence(baseline[0], fakeBlob, [finding]), false)
+
+    const fakeExec = (cmd: string) => {
+      if (cmd.includes('cat-file -t')) return 'commit\n'
+      if (cmd.includes('git show') && cmd.includes(':')) return fakeBlob
+      return ''
+    }
+
+    const result = auditBaseline({
+      execFn: fakeExec,
+      baselineEntries: baseline,
+      scanHistory: false,
+      scanWorkingTree: false,
+    })
+
+    assert.strictEqual(result.synthetic.length, 0)
+    assert.strictEqual(result.invalid.length, 1)
+  })
+
+  it('AUDIT-23 (ALLOWLIST-NEG-01): filterAllowlist rechaza excepciones sin synthetic===true o sin matchPrefix', () => {
+    const badAllowlist: any[] = [
+      {
+        file: 'tests/foo.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: '112233445566',
+        matchPrefix: '',
+        synthetic: true,
+        reason: 'Prefijo vacío no permitido',
+      },
+      {
+        file: 'tests/bar.ts',
+        category: 'CONFIG_SECRET',
+        fingerprint: 'aabbccddeeff',
+        matchPrefix: 'prefix',
+        synthetic: false,
+        reason: 'synthetic false no permitido',
+      },
+    ]
+
+    const findingA: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: 'tests/foo.ts',
+      line: 5,
+      preview: 'secr…(20 caracteres)',
+      fingerprint: '112233445566',
+      raw: 'secret_val_12345678',
+    }
+
+    const findingB: SecretFinding = {
+      pattern: 'CONFIG_SECRET',
+      desc: 'Secret',
+      source: 'tests/bar.ts',
+      line: 5,
+      preview: 'pref…(20 caracteres)',
+      fingerprint: 'aabbccddeeff',
+      raw: 'prefix_val_12345678',
+    }
+
+    // Directamente contra filterAllowlist (desactivando la excepción de validateAllowlist para probar la lógica de filtro)
+    assert.throws(() => filterAllowlist([findingA], [badAllowlist[0]]), /'matchPrefix' es obligatorio/)
+    assert.throws(() => filterAllowlist([findingB], [badAllowlist[1]]), /'synthetic' es obligatorio/)
   })
 })
