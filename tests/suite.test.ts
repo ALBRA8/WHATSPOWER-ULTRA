@@ -7,6 +7,7 @@ import { LocalSuppressionStore, FatigueManager } from '../src/safety/suppression
 import { MockDispatcher } from '../src/adapters/dispatcher.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { Throttler } from '../src/queue/throttler.ts'
+import { transitionCampaignStatus } from '../src/queue/campaign-lifecycle.ts'
 
 async function runBroadcastTestSuite() {
   console.log('\n============================================================')
@@ -264,6 +265,13 @@ invalido,Error,Cali
       templateSpintax: 'Buenas noches {{name}}',
       csvContent: csvData,
     })
+
+    // (hallazgo 10, auditoría funcional 2026-11-12) la pausa por horario es una
+    // transición de la MÁQUINA DE ESTADOS (RUNNING → PAUSED_OFF_HOURS): la
+    // campaña se ACTIVA antes de la prueba nocturna (el guard real aplica a una
+    // campaña operable; el worker jamás consume DRAFT).
+    const startRes = transitionCampaignStatus(db, campaign.id, null, 'RUNNING')
+    assert.ok(startRes.ok, 'la campaña pasa a RUNNING para la prueba nocturna')
 
     // Simular las 22:00 (10:00 PM hora Bogotá)
     const nightDate = new Date('2026-10-24T22:00:00-05:00')

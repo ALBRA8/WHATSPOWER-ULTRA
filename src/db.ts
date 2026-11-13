@@ -154,6 +154,19 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
   }
 
   // ============================================================
+  // (hallazgo 10, auditoría funcional 2026-11-12) campaigns.cooldown_started_at
+  // Timestamp DURABLE de la pausa por enfriamiento: permite la REANUDACIÓN
+  // AUTOMÁTICA de campañas PAUSED_COOLDOWN cuando el cooldown REALMENTE venció,
+  // incluso tras reiniciar el proceso (el estado in-memory del Throttler se
+  // pierde al reiniciar; este timestamp sobrevive).
+  //  (rollback: ALTER TABLE campaigns DROP COLUMN cooldown_started_at;)
+  // ============================================================
+  const campaignCols = (db.prepare('PRAGMA table_info(campaigns)').all() as Array<{ name: string }>).map((c) => c.name)
+  if (!campaignCols.includes('cooldown_started_at')) {
+    db.exec(`ALTER TABLE campaigns ADD COLUMN cooldown_started_at INTEGER`)
+  }
+
+  // ============================================================
   // v4 — TERCERA REPARACIÓN (5.B): SUPRESIÓN Y FATIGA POR ORGANIZACIÓN
   //  - suppression_list: PK pasa de (phone) a (organization_id, phone).
   //    Las filas globales legacy se copian CONSERVADORAMENTE a la nueva lista
