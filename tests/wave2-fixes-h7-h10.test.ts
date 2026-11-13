@@ -31,7 +31,7 @@ import { transitionCampaignStatus } from '../src/queue/campaign-lifecycle.ts'
 const BUSINESS_HOUR = new Date('2026-11-09T15:00:00Z')
 const CSV_1 = 'phone,name\n573000002101,Solo\n'
 
-function makeEngine(db: import('node:sqlite').DatabaseSync, dispatcher: any, opts?: { durablePacing?: boolean; throttler?: Partial<import('../src/queue/throttler.ts').ThrottlerOptions>; nowMs?: () => number }): BroadcastEngine {
+function makeEngine(db: import('node:sqlite').DatabaseSync, dispatcher: any, opts?: { durablePacing?: boolean; throttler?: Partial<import('../src/queue/throttler.ts').ThrottlerOptions>; nowMs?: () => number; claimLeaseRenewIntervalMs?: number }): BroadcastEngine {
   return new BroadcastEngine({
     db,
     dispatcher,
@@ -39,6 +39,7 @@ function makeEngine(db: import('node:sqlite').DatabaseSync, dispatcher: any, opt
     durablePacing: opts?.durablePacing,
     throttlerOptions: opts?.throttler,
     nowMs: opts?.nowMs,
+    claimLeaseRenewIntervalMs: opts?.claimLeaseRenewIntervalMs,
   })
 }
 
@@ -83,6 +84,30 @@ describe('H8 — finalización tardía de un despacho: SIN doble contabilizació
     // Fatiga NO registrada:
     const fatiga = db.prepare('SELECT count(*) AS n FROM contact_fatigue').get() as { n: number }
     assert.strictEqual(fatiga.n, 0, 'recordBroadcast NO se invocó')
+  })
+
+  it('H8-01b: despacho activo >15 min renueva lease y NO se reconcilia como abandonado', { timeout: 10000 }, async () => {
+    const db = createBroadcastDatabase(':memory:')
+    let clock = Date.now()
+    const nowMs = () => clock
+    const engineB = makeEngine(db, { dispatch: async () => OK_DISPATCH }, { nowMs })
+    const engineA = makeEngine(db, {
+      dispatch: async () => {
+        // Primer heartbeat con el reloj original; después simulamos 15 min
+        // de trabajo adicional y esperamos al siguiente heartbeat.
+        await new Promise((resolve) => setTimeout(resolve, 1100))
+        clock += 901_000
+        await new Promise((resolve) => setTimeout(resolve, 1100))
+        const reconciled = engineB.reconcileStaleClaims(900)
+        assert.strictEqual(reconciled.reconciledCount, 0, 'un despacho vivo conserva un lease reciente')
+        return OK_DISPATCH
+      },
+    }, { nowMs, claimLeaseRenewIntervalMs: 1000 })
+    const campaignId = await startCampaignAsync(engineA, 'org_h8_lease', 'Despacho largo', CSV_1)
+    const res = await engineA.processNextItem(campaignId, BUSINESS_HOUR)
+    assert.strictEqual(res.status, 'SENT')
+    assert.strictEqual(engineA.getCampaign(campaignId)!.sentCount, 1)
+    assert.strictEqual(engineA.getItems(campaignId)[0].status, 'SENT')
   })
 
   it('H8-02: despacho INCIERTO con claim reconciliado durante el vuelo → CLAIM_LOST, failed_count intacto', async () => {
