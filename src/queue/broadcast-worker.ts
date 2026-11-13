@@ -67,6 +67,7 @@ export class BroadcastEngine {
   /** (hallazgo 9) pacing DURABLE por organización activado (worker de producción). */
   readonly durablePacing: boolean
   private nowMs: () => number
+  private readonly claimLeaseRenewIntervalMs: number
 
   constructor(options: {
     db: DatabaseSync
@@ -80,6 +81,8 @@ export class BroadcastEngine {
     durablePacing?: boolean
     /** Reloj inyectable (pruebas con reloj controlado, sin esperas reales). */
     nowMs?: () => number
+    /** Intervalo de renovación del lease durante un despacho en vuelo. */
+    claimLeaseRenewIntervalMs?: number
   }) {
     this.db = options.db
     this.dispatcher = options.dispatcher
@@ -90,6 +93,7 @@ export class BroadcastEngine {
     this.workerId = options.workerId || `wrk_${randomUUID()}`
     this.durablePacing = options.durablePacing ?? false
     this.nowMs = options.nowMs ?? (() => Date.now())
+    this.claimLeaseRenewIntervalMs = Math.max(1000, options.claimLeaseRenewIntervalMs ?? 60_000)
   }
 
   /** (hallazgo 8/9) libera un claim DISPATCHING devolviendo el ítem a PENDING
@@ -484,7 +488,26 @@ export class BroadcastEngine {
 
     // G. Despacho a través de la Interfaz del CRM
     // B3: el despacho NOMBRA la organización de la campaña (identidad extremo a extremo).
-    const dispatchRes = await this.dispatcher.dispatch(phone, renderedText, campaign.organizationId)
+    // Lease renovable mientras el transporte sigue ejecutando el despacho.
+    // La actualización está protegida por estado + propietario: nunca resucita
+    // un claim que otra réplica ya haya reconciliado o adquirido.
+    const leaseTimer = setInterval(() => {
+      try {
+        this.db.prepare(`
+          UPDATE campaign_items SET claimed_at = ?
+          WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+        `).run(Math.floor(this.nowMs() / 1000), nextItem.id, this.workerId)
+      } catch (err) {
+        console.error('[broadcast-worker] No se pudo renovar lease del despacho', err)
+      }
+    }, this.claimLeaseRenewIntervalMs)
+    leaseTimer.unref?.()
+    let dispatchRes: Awaited<ReturnType<Dispatcher['dispatch']>>
+    try {
+      dispatchRes = await this.dispatcher.dispatch(phone, renderedText, campaign.organizationId)
+    } finally {
+      clearInterval(leaseTimer)
+    }
     const dispatchTime = Math.floor(this.nowMs() / 1000)
 
     if (dispatchRes.success) {
@@ -641,7 +664,7 @@ export class BroadcastEngine {
    * exigen resolución humana o del proceso de reconciliación autorizado.
    */
   reconcileStaleClaims(maxAgeSeconds: number = 900): { reconciledCount: number } {
-    const cutoff = Math.floor(Date.now() / 1000) - maxAgeSeconds
+    const cutoff = Math.floor(this.nowMs() / 1000) - maxAgeSeconds
     const res = this.db.prepare(`
       UPDATE campaign_items
       SET status = 'UNCERTAIN_DISPATCH',
@@ -683,7 +706,7 @@ export class BroadcastEngine {
     // (reparación integral) Solo los claims EXPIRIDOS o huérfanos (claimed_at nulo de
     // migraciones viejas) se marcan UNCERTAIN_DISPATCH; los ítems en vuelo de workers
     // vivos (claim reciente) NO se tocan al arrancar otra réplica.
-    const staleCutoff = Math.floor(Date.now() / 1000) - 900
+    const staleCutoff = Math.floor(this.nowMs() / 1000) - 900
     const result = this.db.prepare(`
       UPDATE campaign_items
       SET status = 'UNCERTAIN_DISPATCH', error_reason = 'Proceso interrumpido durante despacho (Resultado Incierto - Bloqueado contra reenvío ciego)'
