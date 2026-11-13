@@ -32,7 +32,7 @@ function graphStub(captured: Array<{ auth: string; phoneId: string; to: string }
     const match = url.match(/graph\.facebook\.com\/v[\d.]+\/(\d+)\/messages/)
     if (!match) return new Response('{}', { status: 404 })
     captured.push({
-      auth: (init?.headers as Record<string, string>)['Authorization'],
+      auth: ((init?.headers || {}) as Record<string, string>)['Authorization'],
       phoneId: match[1],
       to: JSON.parse(String(init?.body)).to,
     })
@@ -164,7 +164,7 @@ describe('fuente CRM — el administrador de conexiones (contrato OLEADA 2)', ()
   it('cada org se consulta autenticada CON SU credencial y el CRM confirma la identidad', async () => {
     const calls: Array<{ auth: string; url: string }> = []
     const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const auth = (init?.headers as Record<string, string>)['Authorization']
+      const auth = ((init?.headers || {}) as Record<string, string>)['Authorization']
       calls.push({ auth, url: String(input) })
       if (auth === 'Bearer secreto-servicio-a-0123456789') {
         return new Response(JSON.stringify({

@@ -10,11 +10,17 @@
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "node scripts/run-tests.mjs",
     "security:scan": "node scripts/scan-secrets.mjs",
+    "security:scan:history": "node scripts/scan-secrets.mjs --history",
+    "security:baseline:audit": "node scripts/audit-baseline.mjs",
+    "audit": "npm audit --audit-level=moderate",
     "tsc": "tsc --noEmit -p tsconfig.json",
-    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts"
+    "lint": "oxlint src/ tests/ scripts/",
+    "build": "tsc -p tsconfig.build.json",
+    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts tests/security-hardening.test.ts tests/scan-secrets.test.ts tests/http-auth-real.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "oxlint": "^1.93.0",
     "typescript": "^7.0.2"
   }
 }

@@ -16,7 +16,7 @@
  *  U-B3-04  HttpCrmDaemonDispatcher sin organización → TENANT_CONTEXT_INVALID
  *           sin red; con organización → body.orgId + header X-Org-Id.
  */
-import { test, describe } from 'node:test'
+import { test, describe, beforeEach } from 'node:test'
 import assert from 'node:assert'
 import { createServer } from 'node:http'
 import { Http2ALockChecker } from '../src/safety/lock-checker.ts'
@@ -55,6 +55,10 @@ async function start2AStub(registered: Record<string, string>) {
 }
 
 describe('B3: identidad de organización en la integración 2B → 2A', () => {
+  beforeEach(() => {
+    resetOrgCredentialCache()
+  })
+
   test('U-B3-01: lock-checker sin credencial de la org → fail-closed SIN red', async () => {
     delete process.env.WHATSPOWER_ORG_CREDENTIALS
     resetOrgCredentialCache()

@@ -65,6 +65,8 @@ describe('AUTH: superficie administrativa de despacho protegida', () => {
     { m: 'POST', p: '/api/spintax/preview', body: { template: '{a|b}' } },
     { m: 'POST', p: '/api/audiences/preview-csv', body: { csvContent: 'phone\n57300' } },
     { m: 'POST', p: '/api/ai/neuromarketing/analyze', body: { market: 'x' } },
+    { m: 'POST', p: '/api/ai/neuromarketing/generate-spintax', body: { objective: 'x' } },
+    { m: 'POST', p: '/api/ai/neuromarketing/master-prompt', body: { product: 'x' } },
   ]
 
   for (const r of routes) {
@@ -100,6 +102,41 @@ describe('AUTH: superficie administrativa de despacho protegida', () => {
     } finally {
       process.env.ADMIN_API_KEYS = prev
     }
+  })
+
+  it('AUTH-REJECT-NO-HEADER: peticiones GET /api/* sin cabecera de autorización son rechazadas con 401', async () => {
+    const server = boot()
+    const base = await listenEphemeral(server)
+    try {
+      const res = await fetch(`${base}/api/campaigns`)
+      assert.strictEqual(res.status, 401, 'Debe responder 401 Unauthorized sin credenciales')
+      const body = await res.json() as any
+      assert.ok(body.error?.includes('Unauthorized'), 'El cuerpo debe confirmar Unauthorized')
+    } finally { server.close() }
+  })
+
+  it('AUTH-REJECT-BAD-TOKEN: peticiones GET /api/* con Bearer token no reconocido son rechazadas con 401', async () => {
+    const server = boot()
+    const base = await listenEphemeral(server)
+    try {
+      const res = await fetch(`${base}/api/campaigns`, {
+        headers: { 'Authorization': 'Bearer token_malicioso_no_registrado' },
+      })
+      assert.strictEqual(res.status, 401, 'Debe responder 401 Unauthorized con token inválido')
+      const body = await res.json() as any
+      assert.ok(body.error?.includes('Unauthorized'), 'El cuerpo debe confirmar Unauthorized')
+    } finally { server.close() }
+  })
+
+  it('AUTH-REJECT-BAD-COOKIE: peticiones GET /api/* con cookie de sesión falsificada son rechazadas con 401', async () => {
+    const server = boot()
+    const base = await listenEphemeral(server)
+    try {
+      const res = await fetch(`${base}/api/campaigns`, {
+        headers: { 'Cookie': 'ultra_studio_session=fake_cookie_session_value' },
+      })
+      assert.strictEqual(res.status, 401, 'Debe responder 401 con cookie inválida')
+    } finally { server.close() }
   })
 
   it('AUTH-503: sin ADMIN_API_KEYS, el endpoint de DESPACHO step NO puede ejecutarse', async () => {
@@ -544,7 +581,7 @@ describe('TR: salvaguardas de despacho real en TODOS los adaptadores', () => {
     const origFetch = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       fetchCalled++
-      sentAuth = (init?.headers as Record<string, string>)['Authorization']
+      sentAuth = ((init?.headers || {}) as Record<string, string>)['Authorization']
       sentPhoneId = String(input).match(/graph\.facebook\.com\/v[\d.]+\/(\d+)\/messages/)![1]
       return new Response(JSON.stringify({ messages: [{ id: 'wamid_test' }] }), { status: 200 })
     }) as any

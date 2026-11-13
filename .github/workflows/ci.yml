@@ -10,17 +10,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: TypeScript (fail-fast)
-        run: npm install && npx tsc --noEmit -p tsconfig.json
-      - name: Escáner de secretos
+      - name: Instalar dependencias
+        run: npm ci
+      - name: TypeScript & Static Check (fail-fast)
+        run: npm run tsc
+      - name: Lint
+        run: npm run lint
+      - name: Build (compilación de producción hacia dist/)
+        run: npm run build
+      - name: Auditoría de dependencias (npm audit)
+        run: npm run audit
+      - name: Escáner de secretos en árbol de trabajo
         run: npm run security:scan
-      - name: Suite completa (incluye seguridad AUTH/ORG/OWN/WH/TR/ENV)
+      - name: Escáner de secretos en historial Git
+        run: npm run security:scan:history
+      - name: Auditoría de baseline de secretos (directa e inversa)
+        run: npm run security:baseline:audit
+      - name: Suite completa de pruebas (incluye AUTH, ORG, OWN, WH, TR, ENV, circuito de bajas y autenticación real)
         run: npm test
         env:
           NODE_ENV: test
-          # El suite de seguridad define sus propias identidades de prueba;
-          # esta clave evita el fail-closed 503 en cualquier test que la necesite.
           ADMIN_API_KEYS: ci-only-ultra-admin-key-0000000000:org_ci

@@ -187,8 +187,11 @@ describe('OLEADA 2 — proceso persistente de ULTRA (worker 2B)', () => {
     worker.start()
     assert.ok(worker.isRunning)
 
-    // Esperar ≥2 ticks.
-    await new Promise((r) => setTimeout(r, 700))
+    // Esperar ≥2 ticks (polling determinista sin flakiness de reloj)
+    const startWait = Date.now()
+    while (worker.tickCount < 2 && Date.now() - startWait < 2500) {
+      await new Promise((r) => setTimeout(r, 50))
+    }
     assert.ok(worker.tickCount >= 2, `debería haber ≥2 ticks (hay ${worker.tickCount})`)
 
     await worker.stop()

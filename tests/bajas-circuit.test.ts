@@ -54,8 +54,20 @@ async function runBajasCircuitTest() {
   }).catch(() => {})
 
   try {
-    // 1. Verificar estado inicial: no suprimido
-    const checkInitial = await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`)
+    // 0. Demostración de seguridad: peticiones GET no autorizadas DEBEN ser rechazadas con 401
+    const unauthedGet = await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`)
+    assert.strictEqual(unauthedGet.status, 401, 'GET sin Authorization header debe ser rechazado con 401')
+
+    const badAuthGet = await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`, {
+      headers: { 'Authorization': 'Bearer token_invalido_de_prueba' },
+    })
+    assert.strictEqual(badAuthGet.status, 401, 'GET con token inválido debe ser rechazado con 401')
+    console.log('  ✅ [PASS] 0. Autenticación en endpoint GET verificada: peticiones no autorizadas reciben 401')
+
+    // 1. Verificar estado inicial: no suprimido (con credenciales autorizadas)
+    const checkInitial = await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`, {
+      headers: { 'Authorization': `Bearer ${secret}`, 'X-Org-Id': 'org_test' },
+    })
     const initData = await checkInitial.json() as any
     assert.strictEqual(initData.suppressed, false, 'El número no debe estar suprimido inicialmente')
     console.log('  ✅ [PASS] 1. Estado inicial verificado: contacto no suprimido')
@@ -66,8 +78,10 @@ async function runBajasCircuitTest() {
     assert.strictEqual(registerRes.success, true, 'Registro de baja desde CRM a 2A debe ser exitoso')
     console.log('  ✅ [PASS] 2. CRM registró baja en Capa 2A vía API interna sin activar el agente conversacional')
 
-    // 3. Confirmar que 2A persistió la baja en su tabla autoritativa
-    const checkAfter = await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`)
+    // 3. Confirmar que 2A persistió la baja en su tabla autoritativa (con credenciales autorizadas)
+    const checkAfter = await fetch(`http://localhost:3003/api/internal/suppression/${TEST_PHONE}`, {
+      headers: { 'Authorization': `Bearer ${secret}`, 'X-Org-Id': 'org_test' },
+    })
     const afterData = await checkAfter.json() as any
     assert.strictEqual(afterData.suppressed, true, '2A debe reportar suprimido = true')
     console.log('  ✅ [PASS] 3. Capa 2A confirma persistencia en suppression_list autoritativa')
@@ -135,6 +149,8 @@ async function runBajasCircuitTest() {
     }).catch(() => {})
     console.log('  🧹 Registro de prueba eliminado de Capa 2A.')
     await server2A.close()
+    delete process.env.WHATSPOWER_ORG_CREDENTIALS
+    resetOrgCredentialCache()
   }
 
   console.log('\n============================================================')
