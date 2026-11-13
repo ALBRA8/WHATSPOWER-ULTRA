@@ -336,6 +336,22 @@ export class BroadcastEngine {
     }
     const nextItem = claim.item as any
 
+    // Lease renovable durante TODA la vida del claim (chequeos asíncronos
+    // previos y despacho). El timer se auto-detiene cuando la fila deja de
+    // pertenecer a este worker; la condición evita resucitar claims reconciliados.
+    const leaseTimer = setInterval(() => {
+      try {
+        const renewed = this.db.prepare(`
+          UPDATE campaign_items SET claimed_at = ?
+          WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+        `).run(Math.floor(this.nowMs() / 1000), nextItem.id, this.workerId)
+        if (Number(renewed.changes) !== 1) clearInterval(leaseTimer)
+      } catch (err) {
+        console.error('[broadcast-worker] No se pudo renovar lease del claim', err)
+      }
+    }, this.claimLeaseRenewIntervalMs)
+    leaseTimer.unref?.()
+
     // Marcar como RUNNING si estaba DRAFT — CONDICIONAL: si la campaña fue
     // cancelada/pausada durante el claim, el UPDATE no aplica (guard de estado).
     if (campaign.status === 'DRAFT') {
@@ -488,26 +504,7 @@ export class BroadcastEngine {
 
     // G. Despacho a través de la Interfaz del CRM
     // B3: el despacho NOMBRA la organización de la campaña (identidad extremo a extremo).
-    // Lease renovable mientras el transporte sigue ejecutando el despacho.
-    // La actualización está protegida por estado + propietario: nunca resucita
-    // un claim que otra réplica ya haya reconciliado o adquirido.
-    const leaseTimer = setInterval(() => {
-      try {
-        this.db.prepare(`
-          UPDATE campaign_items SET claimed_at = ?
-          WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
-        `).run(Math.floor(this.nowMs() / 1000), nextItem.id, this.workerId)
-      } catch (err) {
-        console.error('[broadcast-worker] No se pudo renovar lease del despacho', err)
-      }
-    }, this.claimLeaseRenewIntervalMs)
-    leaseTimer.unref?.()
-    let dispatchRes: Awaited<ReturnType<Dispatcher['dispatch']>>
-    try {
-      dispatchRes = await this.dispatcher.dispatch(phone, renderedText, campaign.organizationId)
-    } finally {
-      clearInterval(leaseTimer)
-    }
+    const dispatchRes = await this.dispatcher.dispatch(phone, renderedText, campaign.organizationId)
     const dispatchTime = Math.floor(this.nowMs() / 1000)
 
     if (dispatchRes.success) {
