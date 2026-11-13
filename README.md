@@ -81,13 +81,11 @@ npm test
 ```
 Ejecuta la suite de pruebas unitarias, de paridad WhatsOn, contratos y modularidad plug-and-play.
 
-Pruebas E2E de integración (requieren la Capa 2A viva en `:3003` y el secreto interno en `.env`):
-```bash
-npm run test:e2e
-```
-Incluye las salvaguardas pre-piloto (6 checks: fail-closed, 401, UNCERTAIN_DISPATCH aislado, arranque limpio) y el circuito completo de bajas CRM → 2A → 2B con 0 envíos reales.
+`npm run test:e2e` actualmente invoca el mismo ejecutor de pruebas que `npm test`; no equivale por sí solo a una prueba E2E contra servicios vivos.
 
-Smoke contra servicios vivos (modo simulación, 0 envíos reales, limpieza propia):
+Para probar la conexión real Ultra → WHATSPOWER (puerto 3003), configura una organización de laboratorio dedicada: añade `org_smoke_ultra:<credencial-aleatoria>` tanto a `ORG_SERVICE_CREDENTIALS` de WHATSPOWER como a `WHATSPOWER_ORG_CREDENTIALS` de Ultra. No uses credenciales de producción. Mantén `ALLOW_REAL_DISPATCH=false` en ambos servicios.
+
+Smoke contra servicios vivos (requiere WHATSPOWER :3003 y Ultra :3004 en marcha; audiencia ficticia y limpieza de la campaña creada por la prueba):
 ```bash
 node scripts/smoke-live.mjs
 ```
