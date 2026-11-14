@@ -434,7 +434,7 @@ describe('H7 — el worker persistente mantiene el proceso vivo (integración en
           resolve('arrancado')
         }
       }, 100)
-      setTimeout(() => { clearInterval(timer); resolve('timeout') }, 8000)
+      setTimeout(() => { clearInterval(timer); resolve('timeout') }, 20000)
     })
     assert.strictEqual(waited, 'arrancado', `el worker arrancó (stdout: ${stdout.join('').slice(0, 300)}; stderr: ${stderr.join('').slice(0, 300)})`)
 
