@@ -8,14 +8,26 @@ export interface ThrottlerOptions {
   timezone: string // 'America/Bogota'
 }
 
+/**
+ * Valores por defecto de operación (idénticos al comportamiento histórico).
+ * Desde la fase de producción real son ajustables por entorno para despliegues
+ * con ventanas distintas; en ausencia de variables NO cambia nada.
+ */
+function envNum(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
+
 export const DEFAULT_THROTTLER_OPTIONS: ThrottlerOptions = {
-  minIntervalMs: 15_000,
-  maxIntervalMs: 35_000,
-  batchSize: 25,
-  cooldownMs: 300_000, // 5 min
-  businessHoursStart: 8,
-  businessHoursEnd: 18,
-  timezone: 'America/Bogota',
+  minIntervalMs: envNum('THROTTLE_MIN_INTERVAL_MS', 15_000),
+  maxIntervalMs: envNum('THROTTLE_MAX_INTERVAL_MS', 35_000),
+  batchSize: envNum('THROTTLE_BATCH_SIZE', 25),
+  cooldownMs: envNum('THROTTLE_COOLDOWN_MS', 300_000), // 5 min
+  businessHoursStart: envNum('BUSINESS_HOURS_START', 8),
+  businessHoursEnd: envNum('BUSINESS_HOURS_END', 18),
+  timezone: process.env.BUSINESS_HOURS_TZ || 'America/Bogota',
 }
 
 export class Throttler {
