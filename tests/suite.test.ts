@@ -20,21 +20,21 @@ async function runBroadcastTestSuite() {
   // CP-B01: Ingesta y canonización estricta de CSV con de-duplicación
   {
     const csvData = `phone,name,ciudad
-3017543786,Johan Bravo,Bogotá
-+57 301 754 3786,Johan Repetido,Bogotá
-3163301286,ALBRA Empresa,Medellín
+3001112233,Contacto Test,Bogotá
++57 300 111 2233,Contacto Repetido,Bogotá
+3009998877,ALBRA Empresa,Medellín
 6012345678,Fijo Invalido,Bogotá
 invalido,Error,Cali
 3155550106,Diego Torres,Barranquilla`
 
     const res = parseAudienceCsv(csvData)
     assert.strictEqual(res.totalProcessed, 6)
-    assert.strictEqual(res.validCount, 3) // 573017543786, 573163301286, 573155550106
+    assert.strictEqual(res.validCount, 3) // 573001112233, 573009998877, 573155550106
     assert.strictEqual(res.invalidCount, 2) // 6012345678 (fijo) e 'invalido'
-    assert.strictEqual(res.duplicatesCount, 1) // +57 301 754 3786 es duplicado canónico
+    assert.strictEqual(res.duplicatesCount, 1) // +57 300 111 2233 es duplicado canónico
 
-    assert.strictEqual(res.contacts[0].phone, '573017543786')
-    assert.strictEqual(res.contacts[0].name, 'Johan Bravo')
+    assert.strictEqual(res.contacts[0].phone, '573001112233')
+    assert.strictEqual(res.contacts[0].name, 'Contacto Test')
     assert.strictEqual(res.contacts[0].variables?.ciudad, 'Bogotá')
 
     console.log('  ✅ [PASS] CP-B01: Ingesta y canonización estricta de CSV con de-duplicación')
@@ -48,7 +48,7 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
 
     // Bloquear contacto en 2A PARA la organización de la campaña (tercera reparación 5.A)
-    mockLock.setLock('573017543786', 'IN_FLOW_2A', 'org_test_1')
+    mockLock.setLock('573001112233', 'IN_FLOW_2A', 'org_test_1')
 
     const engine = new BroadcastEngine({
       db,
@@ -57,7 +57,7 @@ invalido,Error,Cali
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan Activo\n3155550106,Diego Libre`
+    const csvData = `phone,name\n3001112233,Contacto Activo\n3155550106,Diego Libre`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test_1',
       name: 'Campaña Test Pre-filtrado',
@@ -66,7 +66,7 @@ invalido,Error,Cali
     })
 
     const items = engine.getItems(campaign.id)
-    const lockedItem = items.find((i) => i.contactPhone === '573017543786')
+    const lockedItem = items.find((i) => i.contactPhone === '573001112233')
     const freeItem = items.find((i) => i.contactPhone === '573155550106')
 
     assert.strictEqual(lockedItem?.status, 'LOCK_EXCLUDED')
@@ -91,7 +91,7 @@ invalido,Error,Cali
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan Dinamico`
+    const csvData = `phone,name\n3001112233,Contacto Dinamico`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test_1',
       name: 'Campaña Test JIT',
@@ -104,7 +104,7 @@ invalido,Error,Cali
     assert.strictEqual(item.status, 'PENDING')
 
     // El contacto escribe a WhatsApp antes de que le toque el turno -> adquiere lock en 2A
-    mockLock.setLock('573017543786', 'HANDOFF_HUMAN', 'org_test_1')
+    mockLock.setLock('573001112233', 'HANDOFF_HUMAN', 'org_test_1')
 
     // El worker intenta procesar el ítem
     const businessDate = new Date('2026-10-24T10:00:00-05:00') // 10:00 AM hora Bogotá
@@ -132,7 +132,7 @@ invalido,Error,Cali
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan FailClosed`
+    const csvData = `phone,name\n3001112233,Contacto FailClosed`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test_1',
       name: 'Campaña Test Fail Closed',
@@ -163,7 +163,7 @@ invalido,Error,Cali
     const suppressionStore = new LocalSuppressionStore(db)
 
     // Registrar baja previa de contacto
-    suppressionStore.addSuppression('org_test_1', '573017543786', 'Usuario solicitó BAJA')
+    suppressionStore.addSuppression('org_test_1', '573001112233', 'Usuario solicitó BAJA')
 
     const engine = new BroadcastEngine({
       db,
@@ -173,7 +173,7 @@ invalido,Error,Cali
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan Baja\n3155550106,Diego Activo`
+    const csvData = `phone,name\n3001112233,Contacto Baja\n3155550106,Diego Activo`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test_1',
       name: 'Campaña Test Opt-Out',
@@ -182,7 +182,7 @@ invalido,Error,Cali
     })
 
     const items = engine.getItems(campaign.id)
-    const suppressedItem = items.find((i) => i.contactPhone === '573017543786')
+    const suppressedItem = items.find((i) => i.contactPhone === '573001112233')
     const activeItem = items.find((i) => i.contactPhone === '573155550106')
 
     assert.strictEqual(suppressedItem?.status, 'SUPPRESSED')
@@ -195,20 +195,20 @@ invalido,Error,Cali
   // CP-B06: Variación de Spintax determinista por semilla
   {
     const template = '{Hola|Buenos días|Un saludo} {{name}}, {te presentamos|conoce|descubre} nuestra oferta.'
-    const seed1 = 'cmp_1_573017543786'
+    const seed1 = 'cmp_1_573001112233'
     const seed2 = 'cmp_1_573155550106'
 
-    const render1A = renderSpintax(template, { seed: seed1, variables: { name: 'Johan' } })
-    const render1B = renderSpintax(template, { seed: seed1, variables: { name: 'Johan' } })
+    const render1A = renderSpintax(template, { seed: seed1, variables: { name: 'Contacto' } })
+    const render1B = renderSpintax(template, { seed: seed1, variables: { name: 'Contacto' } })
     const render2 = renderSpintax(template, { seed: seed2, variables: { name: 'Diego' } })
 
     // Idempotencia: misma semilla -> exactamente el mismo texto
     assert.strictEqual(render1A, render1B)
-    assert.ok(render1A.includes('Johan'))
+    assert.ok(render1A.includes('Contacto'))
     assert.ok(render2.includes('Diego'))
 
     // Diferente semilla produce variación
-    assert.notStrictEqual(render1A.replace('Johan', ''), render2.replace('Diego', ''))
+    assert.notStrictEqual(render1A.replace('Contacto', ''), render2.replace('Diego', ''))
 
     console.log('  ✅ [PASS] CP-B06: Variación de Spintax determinista por semilla')
     passed++
@@ -258,7 +258,7 @@ invalido,Error,Cali
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan Noche`
+    const csvData = `phone,name\n3001112233,Contacto Noche`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test_1',
       name: 'Campaña Nocturna',
@@ -299,7 +299,7 @@ invalido,Error,Cali
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan Crash`
+    const csvData = `phone,name\n3001112233,Contacto Crash`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test_1',
       name: 'Campaña Crash Recovery',
@@ -332,3 +332,4 @@ runBroadcastTestSuite().catch((err) => {
   console.error('Error en suite de pruebas 2B:', err)
   process.exit(1)
 })
+

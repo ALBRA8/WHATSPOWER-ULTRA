@@ -205,3 +205,4 @@ describe('B4: ítems de campaña sin organización — cuarentena, nunca despach
     assert.equal(item.status, 'SENT')
   })
 })
+

@@ -32,6 +32,26 @@ describe('PLUG-AND-PLAY MODULARITY TESTS (ALBRA 3 Tiers)', () => {
     assert.strictEqual(campaign.status, 'DRAFT')
     assert.strictEqual(campaign.totalTargets, 2)
 
+    // Registrar consentimiento de los contactos (Ley 1581 / Fase 2)
+    const { ConsentStore } = await import('../src/safety/consent-store.ts')
+    const consentStore = new ConsentStore(db)
+    consentStore.recordConsent({
+      organizationId: 'org_test',
+      contactPhone: '573001112233',
+      whoAuthorized: 'Carlos Standalone',
+      channel: 'web_form',
+      textShown: 'Autorización previa',
+      source: 'formulario_web',
+    })
+    consentStore.recordConsent({
+      organizationId: 'org_test',
+      contactPhone: '573009998877',
+      whoAuthorized: 'Laura Directa',
+      channel: 'web_form',
+      textShown: 'Autorización previa',
+      source: 'formulario_web',
+    })
+
     // Procesar los dos envíos secuencialmente (businessDate fija: evita flaky nocturno por guard de horario)
     const businessDate = new Date('2026-10-24T10:00:00-05:00') // 10:00 AM hora Bogotá
     const step1 = await engine.processNextItem(campaign.id, businessDate)
@@ -91,3 +111,4 @@ describe('PLUG-AND-PLAY MODULARITY TESTS (ALBRA 3 Tiers)', () => {
     assert.strictEqual(mockDispatcher.dispatched.length, 0, 'No debe disparar despacho si está suprimido')
   })
 })
+

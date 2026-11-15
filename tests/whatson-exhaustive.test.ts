@@ -36,8 +36,8 @@ test('SUITE EXHAUSTIVA: WhatsPower-Ultra como Clon 100% WhatsOn & WATI', async (
   // -------------------------------------------------------------
   await t.test('WO-01: Ingesta, normalización +57 y deduplicación de CSV', () => {
     const csv = `phone,name
-3017543786,Johan Bravo
-573017543786,Johan Duplicado
+3001112233,Contacto Test
+573001112233,Contacto Duplicado
 3001234567,Carlos Perez
 invalido123,Descartado`
 
@@ -46,7 +46,7 @@ invalido123,Descartado`
     assert.strictEqual(res.validCount, 2)
     assert.strictEqual(res.duplicatesCount, 1)
     assert.strictEqual(res.invalidCount, 1)
-    assert.strictEqual(res.contacts[0].phone, '573017543786')
+    assert.strictEqual(res.contacts[0].phone, '573001112233')
     assert.strictEqual(res.contacts[1].phone, '573001234567')
   })
 
@@ -69,10 +69,10 @@ invalido123,Descartado`
   // WO-03: Creación de Campaña y Pre-filtrado JIT
   // -------------------------------------------------------------
   await t.test('WO-03: Creación de campaña excluye locks activos en WhatsPower Nivel 2', async () => {
-    lockChecker.busyPhones.add('573017543786') // Ocupado hablando con vendedor
+    lockChecker.busyPhones.add('573001112233') // Ocupado hablando con vendedor
 
     const csv = `phone,name
-573017543786,Ocupado en 2A
+573001112233,Ocupado en 2A
 573001234567,Disponible`
 
     const campaign = await engine.createCampaign({
@@ -87,7 +87,7 @@ invalido123,Descartado`
 
     const items = engine.getItems(campaign.id)
     assert.strictEqual(items.length, 2)
-    const itemLocked = items.find((i) => i.contactPhone === '573017543786')
+    const itemLocked = items.find((i) => i.contactPhone === '573001112233')
     assert.strictEqual(itemLocked?.status, 'LOCK_EXCLUDED')
 
     const itemPending = items.find((i) => i.contactPhone === '573001234567')
@@ -167,3 +167,4 @@ invalido123,Descartado`
     }
   })
 })
+

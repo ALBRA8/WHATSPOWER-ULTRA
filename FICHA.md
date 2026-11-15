@@ -79,7 +79,7 @@ Capa 2B delega el despacho exclusivamente en el CRM:
   - **Payload:**
     ```json
     {
-      "to": "573017543786",
+      "to": "573001112233",
       "text": "Hola Johan, te compartimos nuestra actualización comercial..."
     }
     ```
@@ -94,14 +94,14 @@ Capa 2B consume los endpoints internos expuestos por Capa 2A en el puerto `3003`
 
 #### A. Consulta de Locks Conversacionales
 - **Endpoint:** `GET http://localhost:3003/api/internal/locks/:phone`
-- **Parámetro:** `:phone` canonizado (ej. `573017543786`).
+- **Parámetro:** `:phone` canonizado (ej. `573001112233`).
 - **Respuesta de Capa 2A:**
   ```json
   {
-    "phone": "573017543786",
+    "phone": "573001112233",
     "locked": true,
     "lock": {
-      "contact_phone": "573017543786",
+      "contact_phone": "573001112233",
       "organization_id": "cmvm3i89j0000uy7w660l8lc0",
       "current_state": "IN_FLOW_2A",
       "locked_at": 1792830316,
@@ -116,7 +116,7 @@ Capa 2B consume los endpoints internos expuestos por Capa 2A en el puerto `3003`
 - **Respuesta de Capa 2A:**
   ```json
   {
-    "phone": "573017543786",
+    "phone": "573001112233",
     "suppressed": false
   }
   ```
@@ -311,3 +311,4 @@ Si el proceso de Capa 2B se reinicia intempestivamente durante una campaña acti
    - *Decisión recomendada:* Utilizar `POST http://localhost:3002/send` con el `INTERNAL_API_SECRET` ya validado durante el piloto real de 2A, lo cual desacopla a 2B de la sesión web de usuarios.
 3. **Persistencia de Métricas de Entrega:**
    - Los reportes de entrega (ticks de recibido/leído en WhatsApp) dependen de eventos asíncronos de Baileys que actualmente no se reenviaban hacia satélites. En la fase inicial de 2B, el estado `SENT` certifica la entrega exitosa al socket de WhatsApp.
+

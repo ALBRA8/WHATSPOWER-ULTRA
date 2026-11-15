@@ -85,10 +85,10 @@ async function runContractsIntegrationSuite() {
       })
 
       // 1.1 Solicitud exitosa
-      const okRes = await dispatcher.dispatch('573017543786', 'Mensaje de prueba contractual', 'org_contract')
+      const okRes = await dispatcher.dispatch('573001112233', 'Mensaje de prueba contractual', 'org_contract')
       assert.strictEqual(okRes.success, true)
       assert.ok(okRes.messageId?.startsWith('msg_mock_'))
-      assert.strictEqual(lastReceivedBody.to, '573017543786')
+      assert.strictEqual(lastReceivedBody.to, '573001112233')
       assert.strictEqual(lastReceivedBody.text, 'Mensaje de prueba contractual')
 
       // 1.2 Error de autenticación (secret incorrecto)
@@ -97,20 +97,20 @@ async function runContractsIntegrationSuite() {
         secret: 'wrong_secret_padded_over_16_chars',
         allowRealDispatch: true,
       })
-      const authErrRes = await badAuthDispatcher.dispatch('573017543786', 'Test', 'org_contract')
+      const authErrRes = await badAuthDispatcher.dispatch('573001112233', 'Test', 'org_contract')
       assert.strictEqual(authErrRes.success, false)
       assert.ok(authErrRes.error?.includes('401'))
 
       // 1.3 Error de WhatsApp desconectado en daemon
       daemonState = 'disconnected'
-      const discoRes = await dispatcher.dispatch('573017543786', 'Test', 'org_contract')
+      const discoRes = await dispatcher.dispatch('573001112233', 'Test', 'org_contract')
       assert.strictEqual(discoRes.success, false)
       assert.ok(discoRes.error?.includes('WhatsApp no conectado'))
       daemonState = 'connected'
 
       // 1.4 Respuesta malformada (200 con cuerpo no JSON) -> marca resultado INCIERTO
       simulateMalformed = true
-      const malformedRes = await dispatcher.dispatch('573017543786', 'Test', 'org_contract')
+      const malformedRes = await dispatcher.dispatch('573001112233', 'Test', 'org_contract')
       assert.strictEqual(malformedRes.success, false)
       assert.strictEqual(malformedRes.uncertain, true)
       assert.ok(malformedRes.error?.includes('DAEMON_MALFORMED_RESPONSE'))
@@ -121,7 +121,7 @@ async function runContractsIntegrationSuite() {
         endpointUrl: 'http://localhost:3002/send',
         allowRealDispatch: false,
       })
-      const blockedRes = await safeGuardDispatcher.dispatch('573017543786', 'Test', 'org_contract')
+      const blockedRes = await safeGuardDispatcher.dispatch('573001112233', 'Test', 'org_contract')
       assert.strictEqual(blockedRes.success, false)
       assert.ok(blockedRes.error?.includes('DISPATCH_BLOCKED_BY_SAFETY_GUARD'))
 
@@ -211,44 +211,44 @@ async function runContractsIntegrationSuite() {
       const ORG_B = 'org_beta'
 
       // 2.0 Fail-closed de contexto: sin organización NO se consulta
-      const noCtx = await lockChecker.checkLock('573017543786', '')
+      const noCtx = await lockChecker.checkLock('573001112233', '')
       assert.strictEqual(noCtx.available, false)
       assert.ok(noCtx.error?.includes('TENANT_CONTEXT_INVALID'))
-      await assert.rejects(() => suppressionChecker.isSuppressed('573017543786', ''))
+      await assert.rejects(() => suppressionChecker.isSuppressed('573001112233', ''))
 
       // 2.1 Contacto libre (org A)
-      const freeLock = await lockChecker.checkLock('573017543786', ORG_A)
+      const freeLock = await lockChecker.checkLock('573001112233', ORG_A)
       assert.strictEqual(freeLock.available, true)
 
       // 2.1b Aislamiento: org B ve libre el MISMO teléfono aunque org A esté en lock
-      locksStore.set(`${ORG_A}\u0000573017543786`, { current_state: 'IN_FLOW_2A' })
-      const busyA = await lockChecker.checkLock('573017543786', ORG_A)
+      locksStore.set(`${ORG_A}\u0000573001112233`, { current_state: 'IN_FLOW_2A' })
+      const busyA = await lockChecker.checkLock('573001112233', ORG_A)
       assert.strictEqual(busyA.available, false)
       assert.strictEqual(busyA.state, 'IN_FLOW_2A')
-      const freeB = await lockChecker.checkLock('573017543786', ORG_B)
+      const freeB = await lockChecker.checkLock('573001112233', ORG_B)
       assert.strictEqual(freeB.available, true, 'el lock de org A NO bloquea a org B')
 
       // 2.3 Contacto en HANDOFF_HUMAN (org A)
-      locksStore.set(`${ORG_A}\u0000573017543786`, { current_state: 'HANDOFF_HUMAN' })
-      const handoffLock = await lockChecker.checkLock('573017543786', ORG_A)
+      locksStore.set(`${ORG_A}\u0000573001112233`, { current_state: 'HANDOFF_HUMAN' })
+      const handoffLock = await lockChecker.checkLock('573001112233', ORG_A)
       assert.strictEqual(handoffLock.available, false)
       assert.strictEqual(handoffLock.state, 'HANDOFF_HUMAN')
-      locksStore.delete(`${ORG_A}\u0000573017543786`)
+      locksStore.delete(`${ORG_A}\u0000573001112233`)
 
       // 2.4 Fail-Closed ante error 500 de Capa 2A
       simulate500 = true
-      const errLock = await lockChecker.checkLock('573017543786', ORG_A)
+      const errLock = await lockChecker.checkLock('573001112233', ORG_A)
       assert.strictEqual(errLock.available, false)
       assert.ok(errLock.error?.includes('500'))
 
       await assert.rejects(async () => {
-        await suppressionChecker.isSuppressed('573017543786', ORG_A)
+        await suppressionChecker.isSuppressed('573001112233', ORG_A)
       })
       simulate500 = false
 
       // 2.5 Fail-Closed ante Timeout de Capa 2A
       simulateTimeout = true
-      const timeoutLock = await lockChecker.checkLock('573017543786', ORG_A)
+      const timeoutLock = await lockChecker.checkLock('573001112233', ORG_A)
       assert.strictEqual(timeoutLock.available, false)
       assert.ok(timeoutLock.error?.includes('LOCK_UNAVAILABLE'))
       assert.ok(timeoutLock.error?.toLowerCase().includes('timeout') || timeoutLock.error?.toLowerCase().includes('aborted'))
@@ -257,17 +257,17 @@ async function runContractsIntegrationSuite() {
       // 2.6 (tercera reparación 5.A) Contrato roto: respuesta SIN eco de organización
       //     → RECHAZADA (jamás se confunde con "disponible")
       simulateLegacyNoEcho = true
-      const legacyLock = await lockChecker.checkLock('573017543786', ORG_A)
+      const legacyLock = await lockChecker.checkLock('573001112233', ORG_A)
       assert.strictEqual(legacyLock.available, false, 'respuesta sin eco de org NO se acepta como libre')
       assert.ok(legacyLock.error?.includes('TENANT_UNVERIFIED'))
       assert.strictEqual(legacyLock.contractError, true)
-      await assert.rejects(() => suppressionChecker.isSuppressed('573017543786', ORG_A), /TENANT_UNVERIFIED/)
+      await assert.rejects(() => suppressionChecker.isSuppressed('573001112233', ORG_A), /TENANT_UNVERIFIED/)
       simulateLegacyNoEcho = false
 
       // 2.7 (5.B) Supresión POR ORGANIZACIÓN: la baja de org A no silencia en org B
-      suppressionStore.add(`${ORG_A}\u0000573017543786`)
-      assert.strictEqual(await suppressionChecker.isSuppressed('573017543786', ORG_A), true)
-      assert.strictEqual(await suppressionChecker.isSuppressed('573017543786', ORG_B), false, 'la baja de org A NO silencia a org B')
+      suppressionStore.add(`${ORG_A}\u0000573001112233`)
+      assert.strictEqual(await suppressionChecker.isSuppressed('573001112233', ORG_A), true)
+      assert.strictEqual(await suppressionChecker.isSuppressed('573001112233', ORG_B), false, 'la baja de org A NO silencia a org B')
 
       console.log('  ✅ [PASS] TEST 2: Contrato 2A v2 validado (X-Org-Id obligatorio, eco de org, aislamiento, fail-closed 500/timeout/contrato roto)')
       passed++
@@ -322,7 +322,7 @@ async function runContractsIntegrationSuite() {
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan JIT\n3001234567,Pedro Timeout`
+    const csvData = `phone,name\n3001112233,Contacto JIT\n3001234567,Pedro Timeout`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test',
       name: 'Campaña JIT',
@@ -381,7 +381,7 @@ async function runContractsIntegrationSuite() {
       throttlerOptions: { minIntervalMs: 0, maxIntervalMs: 0 },
     })
 
-    const csvData = `phone,name\n3017543786,Johan Incierto`
+    const csvData = `phone,name\n3001112233,Contacto Incierto`
     const campaign = await engine.createCampaign({
       organizationId: 'org_test',
       name: 'Campaña Incierta',
@@ -451,3 +451,5 @@ runContractsIntegrationSuite().catch((err) => {
   console.error('Error en pruebas de integración contractual:', err)
   process.exit(1)
 })
+
+

@@ -267,3 +267,4 @@ test('U3-09: CompositeSuppressionChecker sincroniza la baja remota EN SU ORGANIZ
   assert.strictEqual(await local.isSuppressed('573005554433', 'org_sync'), true)
   assert.strictEqual(await local.isSuppressed('573005554433', 'org_otra'), false, 'la baja sincronizada de org_sync NO contamina a org_otra')
 })
+

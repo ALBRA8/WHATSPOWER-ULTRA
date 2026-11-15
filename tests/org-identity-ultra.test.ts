@@ -163,3 +163,4 @@ describe('B3: identidad de organización en la integración 2B → 2A', () => {
     }
   })
 })
+

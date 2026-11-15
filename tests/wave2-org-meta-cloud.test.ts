@@ -294,3 +294,4 @@ describe('A1-01: clasificación de incertidumbre en MetaCloudDispatcher', () => 
     assert.match(r.error!, /META_CLOUD_NETWORK_ERROR/)
   })
 })
+

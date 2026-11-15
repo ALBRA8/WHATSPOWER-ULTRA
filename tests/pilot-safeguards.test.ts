@@ -87,7 +87,7 @@ async function runPilotSafeguardsSuite() {
       endpointUrl: 'http://localhost:3002/send',
     })
 
-    const dispatchRes = await safeDispatcher.dispatch('573017543786', 'Mensaje de prueba')
+    const dispatchRes = await safeDispatcher.dispatch('573001112233', 'Mensaje de prueba')
     assert.strictEqual(dispatchRes.success, false)
     assert.ok(dispatchRes.error?.includes('DISPATCH_BLOCKED_BY_SAFETY_GUARD'))
     console.log('  ✅ [PASS] 3. Despacho hacia puerto real bloqueado por salvaguarda física (allowRealDispatch: false)')
@@ -183,7 +183,7 @@ async function runPilotSafeguardsSuite() {
       organizationId: 'org_test',
       name: 'Test Reintentos Inciertos',
       templateSpintax: 'Hola',
-      csvContent: 'phone,name\n573017543786,Test Contact',
+      csvContent: 'phone,name\n573001112233,Test Contact',
     })
 
     const item = engine.getItems(campaign.id)[0]
@@ -221,3 +221,4 @@ runPilotSafeguardsSuite().catch((err) => {
   console.error('Error en suite de salvaguardas:', err)
   process.exit(1)
 })
+

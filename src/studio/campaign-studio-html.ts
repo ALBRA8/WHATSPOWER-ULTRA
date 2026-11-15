@@ -155,11 +155,11 @@ export function renderCampaignStudioHtml(): string {
         </div>
 
         <div class="form-group">
-          <label>Audiencia CSV (Pegar líneas: teléfono,nombre)</label>
-          <textarea id="cmpCsv" rows="4" placeholder="phone,name&#10;573017543786,Johan Bravo&#10;573163301286,ALBRA Negocio&#10;573001234567,Carlos Perez">phone,name
-573017543786,Johan Bravo
-573163301286,ALBRA Negocio
-573001234567,Carlos Perez</textarea>
+          <label>Audiencia CSV (Pegar líneas: teléfono,nombre,origen_consentimiento)</label>
+          <textarea id="cmpCsv" rows="4" placeholder="phone,name,consent_origin&#10;573001112233,Juan Perez,web_checkout&#10;573004445566,Maria Gomez,formulario_registro&#10;573007778899,Carlos Soto,tienda_fisica">phone,name,consent_origin
+573001112233,Juan Perez,web_checkout
+573004445566,Maria Gomez,formulario_registro
+573007778899,Carlos Soto,tienda_fisica</textarea>
           <button class="btn btn-secondary" style="margin-top:6px; font-size:11px; padding:4px 8px;" onclick="previewCsv()">
             📋 Validar Formato y Normalizar (+57)
           </button>

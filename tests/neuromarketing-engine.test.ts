@@ -87,3 +87,4 @@ describe('SUITE MOTOR DE NEUROMARKETING & VENTAS 360° (Nivel 3 WHATSPOWER-ULTRA
     assert.ok(analysis.recommendedArchetype.name)
   })
 })
+

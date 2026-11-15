@@ -9,7 +9,7 @@ async function executeSingleSupervisedPilot() {
   console.log('  ALBRA: EJECUCIÓN DEL PRIMER ENVÍO REAL SUPERVISADO CAPA 2B')
   console.log('============================================================')
 
-  const TARGET_PHONE = '573017543786'
+  const TARGET_PHONE = '573000000001'
   const EXACT_TEXT = 'Tengo estos zapatos para la venta.'
   // FAIL-CLOSED (rotación 2026-10-27): sin secret válido no se despacha (paridad con el gate del daemon :3002)
   const DAEMON_SECRET = process.env.INTERNAL_API_SECRET
@@ -30,7 +30,7 @@ async function executeSingleSupervisedPilot() {
   }
 
   // 1. Verificación obligatoria de destinatario
-  if (TARGET_PHONE !== '573017543786') {
+  if (TARGET_PHONE !== '573000000001') {
     console.error('ERROR CRÍTICO: Destinatario no coincide con la autorización. Abortando.')
     process.exit(1)
   }

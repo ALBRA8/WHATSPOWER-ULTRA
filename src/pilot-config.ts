@@ -22,14 +22,14 @@ export const PILOT_SUPERVISED_CONFIG: PilotConfiguration = {
   pilotId: 'pilot_c2b_supervised_01',
   campaignName: 'PILOTO_SUPERVISADO_C2B_OPERADOR',
   authorized: false, // ESTRICTAMENTE BLOQUEADO
-  operatorPhoneCanonical: '573017543786', // Cliente destinatario
+  operatorPhoneCanonical: '573000000001', // Cliente destinatario de prueba
   templateSpintax: 'Tengo estos zapatos para la venta.',
   lockReason: 'AWAITING_EXPLICIT_USER_AUTHORIZATION_BEFORE_REAL_SEND',
   safetyRequirements: [
     'allowRealDispatch must remain false until explicit authorization',
     'AGENTIC_2A_ENABLED must remain false in CRM environment',
-    'Sender is CRM/negocio (573163301286)',
-    'Recipient is cliente (573017543786)',
+    'Sender is CRM/negocio (573000000002)',
+    'Recipient is cliente (573000000001)',
     'JIT lock and suppression checks must execute immediately before POST',
     'UNCERTAIN_DISPATCH must block blind automated retries',
   ],

@@ -217,3 +217,4 @@ describe('OLEADA 2 — proceso persistente de ULTRA (worker 2B)', () => {
     assert.equal(summary.itemOutcomes['SENT'], 1)
   })
 })
+

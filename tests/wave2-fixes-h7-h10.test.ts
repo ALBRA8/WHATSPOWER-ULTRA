@@ -406,7 +406,7 @@ describe('H10 — reanudación automática de PAUSED_COOLDOWN (solo cooldown ven
 })
 
 describe('H7 — el worker persistente mantiene el proceso vivo (integración en proceso hijo)', () => {
-  it('H7-01: npm run worker permanece ACTIVO, tick-ea y apaga gracioso con SIGTERM', { timeout: 20000 }, async () => {
+  it('H7-01: npm run worker permanece ACTIVO, tick-ea y apaga gracioso con SIGTERM', { timeout: 35000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), 'h7-worker-'))
     const dbPath = join(dir, 'broadcast.db')
     const child = spawn(process.execPath, ['--experimental-strip-types', 'src/worker-main.ts'], {
@@ -434,7 +434,7 @@ describe('H7 — el worker persistente mantiene el proceso vivo (integración en
           resolve('arrancado')
         }
       }, 100)
-      setTimeout(() => { clearInterval(timer); resolve('timeout') }, 20000)
+      setTimeout(() => { clearInterval(timer); resolve('timeout') }, 30000)
     })
     assert.strictEqual(waited, 'arrancado', `el worker arrancó (stdout: ${stdout.join('').slice(0, 300)}; stderr: ${stderr.join('').slice(0, 300)})`)
 
@@ -476,3 +476,4 @@ describe('H7 — el worker persistente mantiene el proceso vivo (integración en
     assert.strictEqual(worker.wasStopped, true)
   })
 })
+

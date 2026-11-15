@@ -689,3 +689,4 @@ describe('parseAdminKeys — dual formato (org:secreto | secreto:org)', () => {
     assert.equal(resolveIdentity('Bearer no-existe-000000000000', keys), null)
   })
 })
+

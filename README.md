@@ -1,11 +1,11 @@
 # WHATSPOWER ULTRA (Nivel 3 ALBRA) — Suite de Difusión Masiva y Escudo Anti-Ban
 
-> **Paridad 100% WhatsOn, WATI y SleekFlow para el Ecosistema CRM ALBRA**  
+> **Suite de Difusión Masiva y Escudo Anti-Ban para el Ecosistema CRM ALBRA**  
 > Diseñado bajo metodología Clean-Room / ClonaKit. Funciona como un "enchufe" ("anillo al dedo"): opera de manera 100% autónoma junto a **CRM-ALBRA (Nivel 1)** sin requerir obligatoriamente el Nivel 2, o se integra con **WHATSPOWER (Nivel 2)** para respetar los locks de atención humana y flujos conversacionales.
 
 ---
 
-## 🚀 Capacidades Principales (WhatsOn & WATI 100% Parity)
+## 🚀 Capacidades Principales de Difusión Masiva y Protección Anti-Ban
 
 1. **Campaign Studio UI (`/campaigns`)**:
    - Panel web interactivo para redactar plantillas con previsualizador Spintax en vivo.
@@ -76,7 +76,7 @@ Abrir en el navegador:
 ```bash
 npm test
 ```
-Ejecuta la suite de pruebas unitarias, de paridad WhatsOn, contratos y modularidad plug-and-play.
+Ejecuta la suite completa de pruebas unitarias, contratos, consentimiento Ley 1581, salvaguardas y modularidad plug-and-play.
 
 Pruebas E2E de integración (requieren la Capa 2A viva en `:3003` y el secreto interno en `.env`):
 ```bash

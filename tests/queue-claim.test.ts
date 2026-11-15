@@ -128,3 +128,4 @@ describe('CLAIM: cola con claim atómico — un ítem, un worker', () => {
     assert.strictEqual(row.status, 'DISPATCHING')
   })
 })
+

@@ -107,3 +107,4 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     assert.strictEqual(metaDispatcher.dispatchedMessages[0].text, '¡Hola! Este mensaje viaja por Meta Cloud API Oficial')
   })
 })
+

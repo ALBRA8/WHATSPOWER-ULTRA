@@ -146,3 +146,4 @@ runBajasCircuitTest().catch((err) => {
   console.error('Error en prueba de bajas:', err)
   process.exit(1)
 })
+

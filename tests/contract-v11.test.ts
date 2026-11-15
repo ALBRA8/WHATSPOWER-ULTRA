@@ -358,3 +358,4 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
     } finally { server.close(); restore() }
   })
 })
+
