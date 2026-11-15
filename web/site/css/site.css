@@ -500,3 +500,25 @@ img, svg { max-width: 100%; }
 @media (max-width: 1024px) { section.logos-fila { grid-template-columns: repeat(18, minmax(0, 1fr)); } }
 @media (max-width: 600px) { section.logos-fila { grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 10px; } html { overflow-x: hidden; } }
 @media (max-width: 480px) { body.k-plan h2 { font-size: 36px; } }
+
+/* check 7: medidas que el original usa y la comparación echó en falta */
+section.logos-fila { padding: 80px 20px 60px; }
+body.k-faq h2 { font-size: 31px; }
+body.k-faq h2.t-35-b { font-size: 31px; }
+body.k-ia nav, body.k-ia .nav { padding: 30px 50px 0 50px; }
+body.k-ia main { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+body.k-plan h2.precio, body.k-plan .t-40 { font-size: 40px; }
+@media (max-width: 768px) {
+  body.k-ia nav, body.k-ia .nav { padding: 21px 46px 0 46px; }
+}
+@media (max-width: 480px) {
+  .pad-hero { padding: 92px 0 0; }
+  body.k-ia main, body.k-ia article { grid-template-columns: 1fr; }
+  body.k-ia article { padding: 21px 14px; }
+}
+
+/* check 7: en móvil las bandas de dos columnas apilan (1 por fila) */
+@media (max-width: 480px) {
+  .pad-hero.grid, .pad-hero { grid-template-columns: 1fr; }
+  .wrap.grid.g-2, .wrap.grid.g-3, .wrap.grid.g-4 { grid-template-columns: 1fr; }
+}

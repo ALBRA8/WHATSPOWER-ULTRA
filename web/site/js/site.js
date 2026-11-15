@@ -22,6 +22,14 @@ for (const caja of $$('[data-acordeon]')) {
     if (!resumen) continue
     const sincronizar = () => resumen.setAttribute('aria-expanded', String(item.open))
     sincronizar()
+    /* se marca en el mismo clic (no solo en el evento toggle, que llega después),
+       para que cualquier comprobación lea el cambio de estado al instante */
+    resumen.addEventListener('click', () => {
+      resumen.setAttribute('aria-expanded', String(!item.open))
+    })
+    resumen.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') resumen.setAttribute('aria-expanded', String(!item.open))
+    })
     item.addEventListener('toggle', sincronizar)
   }
   for (const boton of $$('button.pregunta', caja)) {

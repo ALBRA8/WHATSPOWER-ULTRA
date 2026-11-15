@@ -21,4 +21,5 @@ transcript.json
 usage.json
 questions.json
 scripts/_*
+scripts/cleanup*.mjs
 
