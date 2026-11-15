@@ -98,7 +98,7 @@ export function renderCampaignStudioHtml(): string {
     <div class="nav-tabs">
       <button class="tab-btn active">🎯 Creador de Difusión</button>
       <button class="tab-btn" onclick="loadCampaignsList()">📊 Historial</button>
-      <a class="tab-btn" href="/app/" title="Abrir el panel de control completo">▦ Panel</a>
+      <a class="tab-btn" href="/" title="Abrir el panel de control completo">▦ Panel</a>
     </div>
   </header>
 

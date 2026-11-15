@@ -4,7 +4,11 @@
  * públicas, sin dependencias externas.
  *
  *   web/site/**  ->  build/**        (sitio público: index.html en la raíz)
- *   web/app/**   ->  build/app/**    (panel de control)
+ *
+ * (panel único, 2026-11-16) El panel NO se copia aquí: lo sirve el servidor en
+ * `/` (src/studio/dashboard-html.ts). `web/app/` se queda en el repositorio
+ * como referencia, pero ya no se publica ni se sirve: no puede haber dos
+ * paneles en la salida.
  *
  * `build/` es la carpeta de salida estándar del proyecto (la que se publica).
  * No toca `dist/` (ahí vive el backend compilado) ni ningún otro directorio.
@@ -24,9 +28,8 @@ const outName = outFlag !== -1 && args[outFlag + 1] ? args[outFlag + 1] : 'build
 const outDir = resolve(root, outName)
 
 const siteDir = join(root, 'web', 'site')
-const appDir = join(root, 'web', 'app')
 
-for (const dir of [siteDir, appDir]) {
+for (const dir of [siteDir]) {
   if (!existsSync(dir)) {
     console.error(`[build-site] falta el directorio ${dir}`)
     process.exit(1)
@@ -38,7 +41,6 @@ rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 
 cpSync(siteDir, outDir, { recursive: true })
-cpSync(appDir, join(outDir, 'app'), { recursive: true })
 
 /**
  * favicon.ico — un cuadrado verde con un punto blanco, 16x16 y 32 bits.
@@ -103,7 +105,7 @@ function walk (dir, acc = { files: 0, bytes: 0 }) {
 const total = walk(outDir)
 const mustHave = ['index.html', 'faq/index.html', 'nuevos-planes/index.html',
   'chatgptwhatson-alianza-perfecta/index.html', 'nueva-demo/index.html',
-  'app/index.html', 'app/app.js', 'app/app.css', 'css/site.css', 'js/site.js',
+  'css/site.css', 'js/site.js',
   'favicon.ico', 'img/marca.svg', 'img/hero.svg']
 
 const missing = mustHave.filter((p) => !existsSync(join(outDir, p)))
@@ -117,8 +119,9 @@ writeFileSync(join(outDir, 'build-info.json'), JSON.stringify({
   builtAt: new Date().toISOString(),
   files: total.files,
   bytes: total.bytes,
-  routes: ['/', '/nuevos-planes/', '/faq/', '/chatgptwhatson-alianza-perfecta/', '/nueva-demo/', '/app/']
+  routes: ['/', '/nuevos-planes/', '/faq/', '/chatgptwhatson-alianza-perfecta/', '/nueva-demo/']
 }, null, 2) + '\n')
 
 console.log(`[build-site] ${total.files} ficheros, ${(total.bytes / 1024).toFixed(1)} KiB -> ${outDir}`)
-console.log('[build-site] rutas: / · /nuevos-planes/ · /faq/ · /chatgptwhatson-alianza-perfecta/ · /nueva-demo/ · /app/')
+console.log('[build-site] rutas: / · /nuevos-planes/ · /faq/ · /chatgptwhatson-alianza-perfecta/ · /nueva-demo/')
+console.log('[build-site] el panel no se copia: lo sirve el servidor en /')

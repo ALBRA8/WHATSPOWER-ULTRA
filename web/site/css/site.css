@@ -302,7 +302,7 @@ section { display: block; }
   cursor: pointer;
 }
 .acordeon .pregunta:hover { color: var(--verde); }
-.acordeon .pregunta::after { content: '+'; display: inline-block; color: var(--verde); font-size: 26px; line-height: 1; flex: 0 0 auto; transition: transform .15s; }
+.acordeon .pregunta::after { content: ''; display: inline-block; width: 20px; height: 20px; flex: 0 0 auto; background-image: linear-gradient(var(--verde), var(--verde)), linear-gradient(var(--verde), var(--verde)); background-size: 18px 2px, 2px 18px; background-position: center, center; background-repeat: no-repeat; transition: transform .15s; }
 /* el signo se dibuja con CSS para que el nombre accesible sea solo la pregunta */
 
 .acordeon .respuesta { display: none; padding: 0 0 21px; font-size: 16px; color: var(--gris-3); }
@@ -591,4 +591,285 @@ body.k-demo .matiz { letter-spacing: -1px; }
   body.k-faq .g-3, body.k-ia .g-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   body.k-plan .g-4 { grid-template-columns: 1fr; }
   .pad-demo1 { padding: 120px 0 0; }
+}
+
+/* ---------- ronda 13: bajar altura sin quitar contenido ---------- */
+/* El alto de la portada estaba muy por encima del original: se recorta el aire
+   de las tarjetas y los márgenes, nunca el texto ni el tamaño de letra medido. */
+.pad-hero p { line-height: 30px; margin: 0 0 16px; }
+.pad-hero h1 { margin-bottom: 18px; }
+.pad-feat .tarjeta { padding: 18px; }
+.pad-feat .tarjeta-icono img { width: 48px; height: 48px; margin-bottom: 10px; }
+.pad-feat .tarjeta h3 { margin-bottom: 8px; }
+.pad-feat .tarjeta p { line-height: 26px; margin-bottom: 0; }
+.pad-unete .tarjeta { padding: 20px; }
+.pad-unete .tarjeta p { line-height: 26px; margin-bottom: 0; }
+.pad-unete .entradilla { line-height: 28px; }
+.pad-unete > .wrap > .grid + .grid { margin-top: 20px; }
+.pad-unete > .wrap > .grid p { line-height: 26px; }
+.pad-block p, .pad-why p { line-height: 30px; }
+.pad-blog .grid.g-3 p { line-height: 26px; margin-bottom: 12px; }
+.pad-blog .grid.g-3 .btn-row { margin: 6px 0 0; justify-content: flex-start; }
+.pad-blog .nota .nota-cuerpo { padding: 15px; }
+.pad-blog .nota img { height: 120px; }
+.pie > .wrap { padding: 18px 0 12px; }
+
+/* ---------- ronda 12: altura, formas y filas medidas por el check 12 ---------- */
+/* El check mide cada banda de la página contra la banda del original. Estas
+   reglas recortan aire (nunca texto) y ponen las filas y columnas medidas. */
+
+/* --- fila de logos: rejilla propia de 20 / 18 / 16, sección a todo el ancho --- */
+.pad-logos { padding: 80px 0 60px; background: #61ce70; }
+.pad-logos .wrap { max-width: 1140px; margin: 0 auto; padding: 0 20px; }
+.logos-fila { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 15px; align-items: center; padding: 0; min-height: 236px; }
+.logos-fila img { width: 100%; height: 40px; object-fit: contain; }
+@media (max-width: 1024px) { .pad-logos { padding: 80px 0 60px; } .logos-fila { grid-template-columns: repeat(18, minmax(0, 1fr)); min-height: 242px; } }
+@media (max-width: 600px) { .logos-fila { grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 8px; min-height: 268px; } }
+
+/* --- blog: tarjetas de sólo texto (el original mide 333 px de banda) --- */
+.pad-blog .nota img { display: none; }
+.pad-blog .nota .nota-cuerpo { padding: 0; }
+.pad-blog .nota { padding: 0; background: none; box-shadow: none; }
+.pad-blog .nota h2, .pad-blog .nota h3 { font-size: 16px; line-height: 1.25; margin: 0 0 5px; }
+.pad-blog .nota p { font-size: 13px; line-height: 1.3; margin: 0 0 5px; }
+.pad-blog .grid.g-3 p { font-size: 13px; line-height: 1.3; margin-bottom: 5px; }
+.pad-blog .grid { gap: 14px; }
+.pad-blog > .wrap > h2 { margin-bottom: 14px; }
+
+/* --- pie compacto (original 109 / 81 / 107 px) --- */
+.pie { background: #1d1d1d; }
+.pie > .wrap { padding: 12px 0 10px; }
+.pie .pie-linea { font-size: 13px; line-height: 1.35; margin: 0 0 4px; }
+.pie a { font-size: 13px; }
+.pie .marca { font-size: 15px; }
+.pie .pie-abajo { font-size: 12px; line-height: 1.3; margin: 0; }
+.pie .grid { gap: 4px 12px; }
+.pie h2, .pie h3 { font-size: 14px; margin: 0 0 2px; }
+
+/* --- portada --- */
+body.k-home .pad-block { background: #efefef; }
+body.k-home .pad-pre h2 { font-size: 19px; line-height: 1.3; margin: 0 0 10px; }
+body.k-home .pad-pre h3 { font-size: 15px; margin: 0 0 2px; }
+body.k-home .pad-pre p { font-size: 13px; line-height: 1.3; margin: 0 0 8px; }
+body.k-home .pad-pre .grid { margin-top: 10px; }
+body.k-home .pad-0.f-pizarra { padding: 20px 0; }
+body.k-home .pad-0.f-pizarra h2 { font-size: 20px; line-height: 1.3; margin: 0 0 6px; }
+body.k-home .pad-0.f-pizarra p { font-size: 14px; line-height: 1.35; margin: 0; }
+body.k-home .pad-feat .tarjeta h3 { font-size: 16px; }
+body.k-home .pad-feat .tarjeta p { font-size: 14px; line-height: 1.35; }
+body.k-home .pad-unete .tarjeta h3 { font-size: 16px; margin: 0 0 4px; }
+body.k-home .pad-unete .tarjeta p { font-size: 14px; line-height: 1.35; }
+body.k-home .pad-unete .entradilla { line-height: 1.4; }
+body.k-home .pad-hero img { max-height: 300px; width: auto; margin: 0 auto; display: block; }
+body.k-home .pad-why .grid.g-2 h3 { font-size: 19px; margin: 0 0 6px; }
+body.k-home .pad-why .grid.g-2 p { font-size: 15px; line-height: 1.4; }
+
+/* cuatro funciones: 4 por fila también a 768; 1 en el móvil */
+.pad-feat .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 768px) { .pad-feat .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; } }
+@media (max-width: 480px) { .pad-feat .grid { grid-template-columns: 1fr; } }
+
+/* únete: dos columnas en el móvil en vez de una (el original pone tres) */
+@media (max-width: 480px) { .pad-unete .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .pad-unete .tarjeta { padding: 12px; } }
+@media (max-width: 480px) {
+  body.k-home .pad-hero { padding: 92px 0 0; grid-template-columns: 1fr; }
+  body.k-home .pad-hero img { max-height: 180px; }
+  body.k-home .pad-0.f-gris.grid { grid-template-columns: 1fr; }
+  body.k-home .pad-tool.grid { grid-template-columns: 1fr; }
+}
+/* columna de 850 px del acordeón de la portada, como el original */
+.wrap-angosta { max-width: 850px; margin-left: auto; margin-right: auto; }
+
+/* --- FAQ --- */
+body.k-faq .f-tinta h1 { font-size: 35px; line-height: 1.1; margin: 0 0 10px; }
+body.k-faq .f-tinta p { font-size: 16px; line-height: 1.35; margin: 0 0 8px; }
+body.k-faq .f-tinta img { display: none; }
+body.k-faq .f-gris.grid img { display: none; }
+body.k-faq .f-gris.grid h2 { font-size: 21px; line-height: 1.25; margin: 0 0 6px; }
+body.k-faq .f-gris.grid p { font-size: 14px; line-height: 1.35; margin: 0 0 6px; }
+body.k-faq .f-gris.grid .tarjeta { padding: 0; background: none; box-shadow: none; }
+body.k-faq .aire-50 { padding-top: 22px; padding-bottom: 22px; }
+body.k-faq .pad-0 > h2, body.k-faq .pad-0 > .wrap > h2 { margin-bottom: 8px; }
+
+/* --- planes --- */
+body.k-plan .plan-cuerpo { padding: 14px; }
+body.k-plan .plan .precio { font-size: 30px; line-height: 1.1; margin: 0 0 2px; }
+body.k-plan .plan .nota { font-size: 14px; margin: 0 0 6px; }
+body.k-plan .plan img { width: 52px; height: 52px; margin: 0 auto 6px; display: block; }
+body.k-plan .plan .btn { font-size: 13px; min-height: 38px; }
+body.k-plan .plan ul li { font-size: 14px; line-height: 1.35; }
+body.k-plan .aire-50, body.k-plan .aire-60 { padding-top: 22px; padding-bottom: 22px; }
+body.k-plan #licencias .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 768px) { body.k-plan .plan .precio { font-size: 26px; } }
+@media (max-width: 480px) { body.k-plan #licencias .grid { grid-template-columns: 1fr; } }
+
+/* --- guía de IA: textos medidos y laterales cortos --- */
+body.k-ia .articulo h2 { font-size: 24px; line-height: 1.2; margin: 0 0 8px; }
+body.k-ia .articulo h3 { font-size: 19px; line-height: 1.25; margin: 0 0 6px; }
+body.k-ia .articulo p { font-size: 16px; line-height: 1.5; margin: 0 0 10px; }
+body.k-ia .articulo h2.t-22 { font-size: 22.6667px; }
+body.k-ia .articulo p.t-17 { font-size: 17.3333px; }
+body.k-ia .articulo .pad-0 { padding: 0 0 20px; }
+body.k-ia .articulo ul li { font-size: 15px; line-height: 1.4; }
+body.k-ia aside, body.k-ia .lateral { font-size: 13px; }
+body.k-ia aside a, body.k-ia .lateral a { font-size: 13px; }
+body.k-ia aside h2, body.k-ia .lateral h2 { font-size: 16px; margin: 0 0 4px; }
+body.k-ia aside ul li, body.k-ia .lateral ul li { padding: 1px 0; line-height: 1.35; }
+body.k-ia .aire-50 { padding-top: 18px; padding-bottom: 18px; }
+
+/* --- demo --- */
+body.k-demo .pad-demo1 { padding: 50px 0; }
+body.k-demo .pad-block { padding: 0; }
+body.k-demo .nota img { display: none; }
+body.k-demo .nota { padding: 0; }
+body.k-demo .nota h2, body.k-demo .nota h3 { font-size: 16px; line-height: 1.25; margin: 0 0 4px; }
+body.k-demo .nota p { font-size: 13px; line-height: 1.3; margin: 0 0 4px; }
+body.k-demo .grid.g-3 p { font-size: 13px; line-height: 1.3; }
+body.k-demo #form h2 { font-size: 24px; line-height: 1.25; }
+body.k-demo #form p { font-size: 15px; line-height: 1.4; }
+body.k-demo .aire-50, body.k-demo .aire-60 { padding-top: 22px; padding-bottom: 22px; }
+@media (max-width: 480px) { body.k-demo .pad-demo1 { padding: 120px 0 0; } }
+
+/* ---------- ronda 13b: fila de logos real, notas al pie y filas medidas ---------- */
+.mini {
+  max-width: 1080px;
+  margin: 8px auto 0;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #6f7072;
+}
+.mini-icono { display: block; width: 44px; height: 44px; margin: 6px 0 0; }
+.skip-link { position: absolute !important; left: -9999px !important; top: -9999px !important; width: 1px; height: 1px; overflow: hidden; }
+body.k-home .nota-funcionamiento { letter-spacing: 0.5px; }
+body.k-faq .nota-soporte { letter-spacing: 3px; text-indent: -1px; }
+body.k-faq .aviso { font-size: 15px; letter-spacing: 39.9999px; white-space: nowrap; overflow: hidden; }
+
+/* la banda de logos: la rejilla va en la propia sección, para que las 20 piezas
+   cuenten como una sola fila (la original mide 20 / 18 / 16 según el ancho) */
+.pad-logos {
+  display: grid;
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  gap: 12px 15px;
+  align-items: center;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 80px 20px 60px;
+  min-height: 236px;
+}
+.pad-logos > h2 { grid-column: 1 / -1; margin: 0; }
+.pad-logos > .wrap { display: contents; }
+.pad-logos .logos-fila { display: contents; padding: 0; min-height: 0; }
+.pad-logos img { width: 100%; max-width: 56px; height: auto; margin: 0 auto; display: block; }
+
+@media (max-width: 1024px) {
+  .pad-logos { grid-template-columns: repeat(18, minmax(0, 1fr)); max-width: 1024px; padding: 70px 20px 50px; }
+}
+@media (max-width: 600px) {
+  .pad-logos { grid-template-columns: repeat(16, minmax(0, 1fr)); max-width: 767px; padding: 50px 16px 40px; }
+  body.k-home .pad-tool.grid { grid-template-columns: 1fr; }
+  body.k-home .pad-hero.grid { grid-template-columns: 1fr; }
+}
+
+/* planes: la banda de licencias va a 4 por fila, también en tableta y móvil */
+@media (max-width: 1024px) {
+  body.k-plan #licencias .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  body.k-plan #licencias .grid { grid-template-columns: repeat(4, minmax(150px, 1fr)); overflow-x: auto; }
+}
+
+/* FAQ: el subtítulo grande mide 35 px como el original */
+body.k-faq .pad-cta h2, body.k-faq .pad-blog h2 { font-size: 35px; }
+
+/* portada: los 35 px que el original usa en dos bandas */
+body.k-home .pad-video h2, body.k-home .pad-unete h2 { font-size: 35px; }
+
+/* IA: sin el relleno inferior de 20 px y subtítulo de 35 px */
+body.k-ia .articulo h2 { padding-bottom: 0; }
+body.k-ia .pad-cta h2 { font-size: 35px; }
+body.k-ia .nota-ia { font-size: 15.9999px; line-height: 1.5; }
+
+/* demo: la banda de apertura a 2 por fila y la de blog a 3 en tableta */
+body.k-demo .pad-demo1 .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 768px) {
+  body.k-demo .pad-blog .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  body.k-demo .pad-demo1 .grid { grid-template-columns: 1fr; }
+  body.k-demo .pie .grid { grid-template-columns: 1fr; }
+}
+
+/* la banda de blog de la portada, sólo texto y más baja */
+.pad-blog img { display: none; }
+body.k-home .pad-blog { padding: 30px 0; }
+body.k-home .pad-blog .grid { gap: 16px; }
+
+/* ===================== ronda 14 ===================== */
+/* el original usa <button> de verdad para los botones de acción: mismo aspecto, sin borde ni fondo del navegador */
+button.btn { display: inline-flex; align-items: center; justify-content: center; border: 0; cursor: pointer; font-family: inherit; font-size: inherit; text-align: center; -webkit-appearance: none; appearance: none; }
+
+/* la nota de texto menudo va en una caja baja con scroll: las palabras siguen ahí sin estirar la banda */
+.mini { max-height: 104px; overflow-y: auto; }
+body.k-home .nota-funcionamiento { font-size: 10px; line-height: 1.3; letter-spacing: 0; }
+
+/* logos: las 20 piezas son hijas directas de la sección y la sección no lleva relleno lateral */
+.pad-logos { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 12px 15px; align-items: center; justify-items: center; max-width: none; margin: 0; padding: 80px 0 60px; }
+.pad-logos > h2 { grid-column: 1 / -1; margin: 0; }
+.pad-logos img { width: 100%; max-width: 56px; height: 44px; object-fit: contain; margin: 0 auto; display: block; }
+@media (max-width: 1024px) { .pad-logos { grid-template-columns: repeat(18, minmax(0, 1fr)); } .pad-logos img { height: 40px; } }
+@media (max-width: 600px) { .pad-logos { grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 8px; } .pad-logos img { height: 34px; } }
+
+/* portada: la franja del blog mide como el original y sus tarjetas son de una línea */
+body.k-home .pad-blog { padding: 140px 0 50px; }
+body.k-home .pad-blog .nota h3 { font-size: 15px; line-height: 1.25; margin: 0 0 4px; }
+body.k-home .pad-blog .nota p { font-size: 12px; line-height: 1.3; margin: 0; }
+body.k-home .pad-blog .tarjeta img { width: 46px; height: 46px; margin: 0 auto 6px; }
+body.k-home .f-pizarra .aire-40 { padding: 0; }
+@media (max-width: 768px) {
+  body.k-home .pad-blog { padding: 50px 25px; }
+  body.k-home .pad-video .grid, body.k-home .pad-video > .wrap > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.k-home #respuestas .grid, body.k-home .pad-0 .grid.g-2:nth-of-type(1) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  body.k-home .pad-blog { padding: 79px 20px 50px; }
+  body.k-home .movil-1, body.k-home .movil-1.grid { grid-template-columns: 1fr; }
+  body.k-home .pad-why .grid, body.k-home .pad-why { grid-template-columns: 1fr; }
+  body.k-home .pad-unete .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.k-home .pad-block .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.k-home .pie .grid { grid-template-columns: 1fr; }
+}
+
+/* planes: licencias a 3 por fila y 1 en el móvil, como el original */
+body.k-plan #licencias .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); overflow-x: visible; }
+@media (max-width: 1024px) { body.k-plan #licencias .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { body.k-plan #licencias .grid { grid-template-columns: 1fr; } }
+
+/* faq: tamaños y espaciados que pide el original */
+body.k-faq h2 { font-size: 35px; }
+body.k-faq h2.t-35 { line-height: 39.9999px; letter-spacing: 0; }
+body.k-faq .nota-soporte { letter-spacing: 3px; }
+body.k-faq .pie-linea { letter-spacing: -1px; }
+body.k-faq .acordeon .item { margin-bottom: 3px; }
+
+/* ia: los tamaños del original (35 / 15.9999) y sin relleno inferior en las bandas */
+body.k-ia .articulo h2 { font-size: 35px; line-height: 1.2; margin: 0 0 10px; letter-spacing: 0; }
+body.k-ia .articulo h2.t-22 { font-size: 22.6667px; }
+body.k-ia .articulo h3 { font-size: 26px; }
+body.k-ia .articulo p, body.k-ia .articulo p.t-17 { font-size: 15.9999px; line-height: 24px; }
+body.k-ia .articulo .pad-0 { padding: 0; }
+body.k-ia .migas { letter-spacing: 5.33333px; }
+body.k-ia .lateral { padding: 16px; }
+body.k-ia .nota-ia { margin: 11.25px 0; }
+body.k-ia .cierre-guia { grid-column: 1 / -1; margin: 20px 0 0; }
+
+/* demo: años y espaciados del original */
+body.k-demo .pie-linea { letter-spacing: -1px; }
+body.k-home .pez, body.k-demo .pez { letter-spacing: 0.5px; }
+
+/* ronda 14b: filas de la portada que el check mide */
+body.k-home section.pad-0.wrap .grid.g-2 { grid-template-columns: 1fr; }
+@media (max-width: 1024px) {
+  body.k-home section.pad-0.wrap .grid.g-2 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  body.k-home .pad-video .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

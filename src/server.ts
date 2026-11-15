@@ -20,7 +20,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // ============================================================
-// Páginas estáticas: panel de control (/app/) y sitio público (/sitio/).
+// Página estática del sitio público (/sitio/). El panel NO es estático: se
 // Se sirven tal cual desde build/ (resultado de `npm run build`), luego desde
 // public/ (salidas antiguas) y, si no se ha construido, desde web/.
 // No se ejecuta nada: solo ficheros y su tipo.
@@ -30,11 +30,6 @@ const WEB_ROOT = resolve(fileURLToPath(new URL('../web/', import.meta.url)))
 /** Salidas de `npm run build`, por orden de preferencia. */
 const BUILD_ROOTS = ['../build/', '../public/']
   .map((p) => resolve(fileURLToPath(new URL(p, import.meta.url))))
-
-/** Raíces del panel de control, en orden de preferencia. */
-function panelBases (): string[] {
-  return [...BUILD_ROOTS.map((root) => join(root, 'app')), join(WEB_ROOT, 'app')]
-}
 
 /** Raíces del sitio público, en orden de preferencia. */
 function siteBases (): string[] {
@@ -79,16 +74,15 @@ function findStaticFile (bases: string[], rel: string): string | null {
 }
 
 /**
- * Sirve /app/* y /sitio/* desde disco. Devuelve true si ya ha respondido.
+ * Sirve /sitio/* (y el favicon) desde disco. Devuelve true si ya ha respondido.
  * Prioriza public/ (build) y recurre a web/ (fuentes) para servir sin construir.
  */
 function serveStaticWeb (pathname: string, res: ServerResponse, headOnly: boolean): boolean {
   let bases: string[]
   let rel: string
-  if (pathname.startsWith('/app/')) {
-    bases = panelBases()
-    rel = pathname.slice('/app/'.length)
-  } else if (pathname === '/favicon.ico') {
+  // (panel único 2026-11-16) No se sirve ningún panel estático: /app/… llega
+  // redirigido a `/` antes de esta función. Solo quedan el sitio y el icono.
+  if (pathname === '/favicon.ico') {
     // El icono del sitio vive con las páginas: build/ si está construido, web/site si no.
     bases = siteBases()
     rel = 'favicon.ico'
@@ -104,7 +98,7 @@ function serveStaticWeb (pathname: string, res: ServerResponse, headOnly: boolea
     res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end('<!DOCTYPE html><meta charset="utf-8"><title>No encontrado</title>' +
       '<p style="font-family:system-ui;padding:40px">Página no encontrada. ' +
-      '<a href="/sitio/">Ir al inicio</a> · <a href="/app/">Ir al panel</a></p>')
+      '<a href="/sitio/">Ir al inicio</a> · <a href="/">Ir al panel</a></p>')
     return true
   }
 
@@ -128,10 +122,10 @@ function serveStaticWeb (pathname: string, res: ServerResponse, headOnly: boolea
 }
 
 const STATIC_REDIRECTS: Record<string, string> = {
-  '/app': '/app/',
+  '/app': '/', // (panel único) el segundo panel ya no se sirve: /app/ lleva al panel
   '/sitio': '/sitio/',
   '/inicio': '/sitio/',
-  '/panel': '/app/',
+  '/panel': '/', // (panel único) enlace antiguo al panel: hoy es la portada
 }
 
 // ============================================================
@@ -235,10 +229,10 @@ export function createBroadcastServer(options?: {
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-    // 0-bis. Páginas estáticas: panel (/app/) y sitio público (/sitio/).
+    // 0-bis. Página estática del sitio (/sitio/) y enlaces antiguos del panel.
     // Son solo documentos: no exponen datos ni saltan la autenticación de /api/*.
     if (req.method === 'GET' || req.method === 'HEAD') {
-      const redirectTo = STATIC_REDIRECTS[url.pathname]
+      const redirectTo = STATIC_REDIRECTS[url.pathname] ?? (url.pathname === '/app/' || url.pathname.startsWith('/app/') ? '/' : undefined)
       if (redirectTo) {
         res.writeHead(302, { Location: redirectTo })
         res.end()

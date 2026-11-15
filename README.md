@@ -70,10 +70,12 @@ ALLOW_REAL_DISPATCH=false  # Salvaguarda física: false para simulación, true s
 npm start
 ```
 Abrir en el navegador:
-- 👉 **`http://localhost:3004/`** — Dashboard de paridad completo (login, resumen, chat, contactos, embudo, campañas, etiquetas, agentes, integraciones, ajustes). Requiere sesión.
+- 👉 **`http://localhost:3004/`** — Dashboard de paridad completo (login, resumen, chat, contactos, embudo, campañas, etiquetas, agentes, integraciones, ajustes). Requiere sesión. **Es el único panel.**
 - 👉 **`http://localhost:3004/login`** — Pantalla de acceso.
 - 👉 **`http://localhost:3004/studio`** — Campaign Studio legado (intacto).
 - 👉 **`http://localhost:3004/sitio/`** — Sitio público de referencia (inicio, planes, FAQ, alianza IA, demo).
+
+Las direcciones antiguas `/app/` y `/panel` ya no abren una segunda aplicación: redirigen a `/`. El detalle está en `docs/sitio-y-panel.md`.
 
 ### 3.b. Modo claro/oscuro
 El dashboard tiene un toggle de tema en el topbar (botón 🌙/☀️). Un clic cambia entre modo oscuro (por defecto) y modo claro. La preferencia se guarda en `localStorage` y se restaura al recargar.

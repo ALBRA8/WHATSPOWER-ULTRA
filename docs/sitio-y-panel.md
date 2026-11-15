@@ -1,61 +1,58 @@
-# Panel y sitio público: cómo se abren
+# Panel y sitio público: qué hay y cómo se llega
 
-Este documento explica las dos partes nuevas y cómo llegar a ellas. No hace
-falta instalar nada más: el servidor del proyecto ya las sirve.
+> **Reescrito el 2026-11-16.** La versión anterior daba por hecho que el
+> programa (`/`) era el estudio antiguo y que el panel vivía en `/app/`. Ya no
+> es así: **hay un solo panel** y es la portada del servidor.
 
-> **Lo que importa es el panel.** `/app/` es la aplicación que se usa a diario
-> (crear campañas, contactos, chatbot, bajas, reportes). Las páginas de
-> `/sitio/` son solo una referencia visual del sitio original: nada de lo que
-> se hace en el panel depende de ellas y no hace falta abrirlas para trabajar.
+## Las tres cosas que sirve el servidor
 
-## Qué hay
-
-| Dirección | Qué es | De dónde sale |
+| Dirección | Qué es | Dónde está el código |
 |---|---|---|
-| `/app/` | El panel de control (Campañas, Contactos, Plantillas, Chatbot, Bandeja, Reportes, Enlaces, Bajas, Ajustes) | `web/app/` |
-| `/sitio/` | El sitio público (inicio, planes, preguntas, alianza con IA, demo) | `web/site/` |
-| `/` y `/campaigns` | El *Campaign Studio* que ya existía, sin cambios | `src/studio/campaign-studio-html.ts` |
-| `/api/...` | La API de siempre, con su autenticación | `src/server.ts` |
+| `/` y `/campaigns` | **El panel** (lo único que se usa a diario) | `src/studio/dashboard-html.ts` |
+| `/login` | Pantalla de entrada del panel | `src/studio/dashboard-html.ts` |
+| `/app`, `/app/`, `/app/…`, `/panel` | Enlaces antiguos: redirigen a `/` | `STATIC_REDIRECTS` en `src/server.ts` |
+| `/studio` | Estudio antiguo de campañas, intacto | `src/studio/campaign-studio-html.ts` |
+| `/sitio/` (y `/sitio`, `/inicio`) | Páginas públicas de referencia visual | `web/site/` → `build/` |
+| `/api/*` | API real del panel (401 sin sesión) | `src/dashboard/api.ts` |
 
-## Cómo se arranca
+El panel no es una maqueta: entra por `/login`, guarda en la misma base de
+datos que el motor de envío y llama a los endpoints reales. Se sirve como HTML
+desde TypeScript, no como ficheros estáticos.
+
+## Qué pasó con el segundo panel (`web/app/`)
+
+Había una segunda aplicación en `web/app/` (8 ficheros: `index.html`, `app.js`,
+`api.js`, `store.js`, `ui.js`, `views-core.js`, `views-more.js`, `app.css`) que
+se abría en `/app/` y se copiaba a `build/app/`. Se ha retirado para que no
+existan dos paneles:
+
+- `/app/…` ya no la sirve: redirige a `/` (código 302).
+- `scripts/build-site.mjs` ya no la copia a `build/`.
+- Los ficheros siguen en `web/app/` como referencia, **no se han borrado**.
+
+**Pendiente (esto sí es trabajo, no está hecho):** esa segunda aplicación tenía
+pantallas que el panel único todavía no tiene — *Plantillas*, *Chatbot*,
+*Bandeja de conversaciones*, *Reportes*, *Enlaces* y *Bajas/Consentimiento*.
+Hasta que se porten al panel, esas funciones no se pueden usar desde la
+interfaz. La lista de trabajo está en `PROMPT FINALIZAR.txt` (Bloque A).
+
+## Qué NO hay que romper
+
+- `/` y `/campaigns` deben seguir devolviendo el panel (`navRoot` en el HTML).
+- `/studio` debe seguir respondiendo 200: tiene sus propias pruebas.
+- `/sitio/` es **solo referencia visual**, no el producto.
+- `dist/` no se toca (ahí vive el backend compilado); `build/` es la salida.
+
+## Cómo comprobarlo sin arrancar nada
 
 ```bash
-npm start                 # servidor en http://127.0.0.1:3004
+npm run build                              # escribe build/ (sitio público)
+npm run tsc                                # tipos
+node --test tests/static-web-routes.test.ts # rutas: /app/→/, /, /sitio/, /studio
+node scripts/run-tests.mjs                 # la suite completa
 ```
 
-Después, en el navegador:
-
-- Panel: `http://127.0.0.1:3004/app/`
-- Sitio: `http://127.0.0.1:3004/sitio/`
-
-El servidor sirve el panel y el sitio **sin autenticación** porque son solo
-páginas: no exponen datos. Todo lo que son datos sigue pasando por `/api/*`,
-que exige clave administrativa (`ADMIN_API_KEYS`) o la sesión de `/studio/login`.
-
-## Cómo se construye la versión estática
-
-```bash
-npm run build             # web/  ->  build/
-npm run build:all         # comprueba tipos y luego construye
-```
-
-`build/` es lo que se publica en cualquier alojamiento estático o en el
-servidor del proyecto. Se genera desde `web/` y está ignorado por git, así que
-no se versiona. Si `build/` no existe, el servidor sirve directamente desde
-`web/`: nunca se queda sin páginas.
-
-## Conectar el panel con el servidor
-
-En el panel, botón **Conectar servidor** (arriba a la derecha): se escribe el
-secreto de administración una vez y el servidor devuelve una cookie de sesión.
-El secreto no se guarda en el código ni en el almacenamiento del navegador.
-
-Si el servidor no responde, el panel **no finge que envía**: deja guardar la
-campaña como borrador local y lo dice en pantalla.
-
-## Datos de ejemplo
-
-La primera vez, el panel se rellena con contactos, plantillas y campañas de
-ejemplo guardados en el navegador (clave `whatspower.ultra.v1`), para poder
-tocar todas las pantallas sin servidor. En **Ajustes** hay un botón para
-volver a sembrarlos y otro para borrarlo todo.
+Las pruebas de rutas (`tests/static-web-routes.test.ts`) comprueban justo esto:
+que `/app/…` redirige al panel, que el panel responde en `/` y `/campaigns`,
+que el sitio público vive en `/sitio/` y que ninguna ruta deja leer ficheros de
+fuera de su carpeta.
