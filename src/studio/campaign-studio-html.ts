@@ -27,9 +27,11 @@ export function renderCampaignStudioHtml(): string {
     .brand-logo { width: 32px; height: 32px; background: linear-gradient(135deg, #10b981, #06b6d4); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; }
     .brand-title { font-size: 16px; font-weight: 700; color: #fff; }
     .brand-sub { font-size: 11px; color: var(--text-muted); background: #1e293b; padding: 2px 8px; border-radius: 12px; }
-    .nav-tabs { display: flex; gap: 8px; }
+    .nav-tabs { display: flex; gap: 8px; align-items: center; }
     .tab-btn { background: transparent; border: 1px solid transparent; color: var(--text-muted); padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
     .tab-btn.active { background: #1f2937; color: #fff; border-color: var(--panel-border); }
+    a.tab-btn { text-decoration: none; display: inline-flex; align-items: center; border-color: var(--panel-border); color: #a7f3d0; }
+    a.tab-btn:hover { color: #fff; }
 
     /* Main Container */
     main { flex: 1; display: flex; overflow: hidden; }
@@ -96,6 +98,7 @@ export function renderCampaignStudioHtml(): string {
     <div class="nav-tabs">
       <button class="tab-btn active">🎯 Creador de Difusión</button>
       <button class="tab-btn" onclick="loadCampaignsList()">📊 Historial</button>
+      <a class="tab-btn" href="/app/" title="Abrir el panel de control completo">▦ Panel</a>
     </div>
   </header>
 

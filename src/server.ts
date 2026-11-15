@@ -11,6 +11,124 @@ import { ConsentStore } from './safety/consent-store.ts'
 import { renderCampaignStudioHtml } from './studio/campaign-studio-html.ts'
 import { renderSpintax } from './engine/spintax.ts'
 import { parseAudienceCsv } from './audiences/csv-importer.ts'
+import { readFileSync, statSync } from 'node:fs'
+import { extname, join, normalize, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// ============================================================
+// Páginas estáticas: panel de control (/app/) y sitio público (/sitio/).
+// Se sirven tal cual desde build/ (resultado de `npm run build`), luego desde
+// public/ (salidas antiguas) y, si no se ha construido, desde web/.
+// No se ejecuta nada: solo ficheros y su tipo.
+// Los datos siguen detrás de /api/* con su autenticación de siempre.
+// ============================================================
+const WEB_ROOT = resolve(fileURLToPath(new URL('../web/', import.meta.url)))
+/** Salidas de `npm run build`, por orden de preferencia. */
+const BUILD_ROOTS = ['../build/', '../public/']
+  .map((p) => resolve(fileURLToPath(new URL(p, import.meta.url))))
+
+/** Raíces del panel de control, en orden de preferencia. */
+function panelBases (): string[] {
+  return [...BUILD_ROOTS.map((root) => join(root, 'app')), join(WEB_ROOT, 'app')]
+}
+
+/** Raíces del sitio público, en orden de preferencia. */
+function siteBases (): string[] {
+  return [...BUILD_ROOTS, join(WEB_ROOT, 'site')]
+}
+
+const STATIC_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+}
+
+/** Localiza un fichero dentro de una de las raíces permitidas, sin salir de ellas. */
+function findStaticFile (bases: string[], rel: string): string | null {
+  const clean = normalize(rel).replace(/^[/\\]+/, '')
+  if (clean.split(/[/\\]/).includes('..')) return null
+  const candidates = clean === '' || clean.endsWith('/') || clean.endsWith('\\')
+    ? [join(clean, 'index.html')]
+    : [clean, join(clean, 'index.html')]
+  for (const base of bases) {
+    for (const candidate of candidates) {
+      const full = resolve(base, candidate)
+      if (full !== base && !full.startsWith(base + sep)) continue
+      try {
+        if (statSync(full).isFile()) return full
+      } catch {
+        // no existe: se prueba el siguiente candidato
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Sirve /app/* y /sitio/* desde disco. Devuelve true si ya ha respondido.
+ * Prioriza public/ (build) y recurre a web/ (fuentes) para servir sin construir.
+ */
+function serveStaticWeb (pathname: string, res: ServerResponse, headOnly: boolean): boolean {
+  let bases: string[]
+  let rel: string
+  if (pathname.startsWith('/app/')) {
+    bases = panelBases()
+    rel = pathname.slice('/app/'.length)
+  } else if (pathname === '/favicon.ico') {
+    // El icono del sitio vive con las páginas: build/ si está construido, web/site si no.
+    bases = siteBases()
+    rel = 'favicon.ico'
+  } else if (pathname.startsWith('/sitio/')) {
+    bases = siteBases()
+    rel = pathname.slice('/sitio/'.length)
+  } else {
+    return false
+  }
+
+  const file = findStaticFile(bases, rel)
+  if (!file) {
+    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end('<!DOCTYPE html><meta charset="utf-8"><title>No encontrado</title>' +
+      '<p style="font-family:system-ui;padding:40px">Página no encontrada. ' +
+      '<a href="/sitio/">Ir al inicio</a> · <a href="/app/">Ir al panel</a></p>')
+    return true
+  }
+
+  let body: Buffer
+  try {
+    body = readFileSync(file)
+  } catch {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('No se pudo leer el fichero')
+    return true
+  }
+  const type = STATIC_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream'
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Content-Length': String(body.length),
+    'Cache-Control': type.startsWith('text/html') ? 'no-cache' : 'public, max-age=300',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  res.end(headOnly ? undefined : body)
+  return true
+}
+
+const STATIC_REDIRECTS: Record<string, string> = {
+  '/app': '/app/',
+  '/sitio': '/sitio/',
+  '/inicio': '/sitio/',
+  '/panel': '/app/',
+}
 
 // ============================================================
 // (A5-08, auditoría 2026-11-11) Umbrales de proceso: una rejection/excepción
@@ -113,6 +231,17 @@ export function createBroadcastServer(options?: {
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    // 0-bis. Páginas estáticas: panel (/app/) y sitio público (/sitio/).
+    // Son solo documentos: no exponen datos ni saltan la autenticación de /api/*.
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const redirectTo = STATIC_REDIRECTS[url.pathname]
+      if (redirectTo) {
+        res.writeHead(302, { Location: redirectTo })
+        res.end()
+        return
+      }
+      if (serveStaticWeb(url.pathname, res, req.method === 'HEAD')) return
+    }
 
     // ==============================================================
     // PUERTA DE AUTENTICACIÓN (orden de cierre 2026-11-06)
