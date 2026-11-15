@@ -3,11 +3,15 @@ import { randomUUID } from 'node:crypto'
 import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
-import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual } from './security.ts'
+import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual, STUDIO_SESSION_COOKIE } from './security.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
 import { renderCampaignStudioHtml } from './studio/campaign-studio-html.ts'
+// (paridad dashboard 2026-11-15) UI completa + endpoints del dashboard de paridad.
+// Todo ADITIVO: las rutas y el esquema existentes del motor de broadcast no cambian.
+import { renderDashboardLoginHtml, renderDashboardAppHtml } from './studio/dashboard-html.ts'
+import { handleDashboardApi } from './dashboard/api.ts'
 import { renderSpintax } from './engine/spintax.ts'
 import { parseAudienceCsv } from './audiences/csv-importer.ts'
 
@@ -117,7 +121,11 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     // SALVO: /api/health (público) y /api/audiences/webhook-lead (HMAC propio).
     // Fail-closed: sin ADMIN_API_KEYS configurado, 503.
     // ==============================================================
-    const isPublicApiPath = url.pathname === '/api/health' || url.pathname === '/api/audiences/webhook-lead'
+    // (paridad dashboard) webhook-message es público CON SU PROPIA verificación HMAC v2
+    // (igual que webhook-lead) y se gestiona en handleDashboardApi.
+    const isPublicApiPath = url.pathname === '/api/health'
+      || url.pathname === '/api/audiences/webhook-lead'
+      || url.pathname === '/api/audiences/webhook-message'
     let identity: AdminIdentity | null = null
     if (url.pathname.startsWith('/api/') && !isPublicApiPath) {
       if (adminKeys.length === 0) {
@@ -185,8 +193,28 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       return
     }
 
-    // 0. Campaign Studio UI
+    // 0. UI del DASHBOARD de paridad (Fase 3): login dedicado + app completa.
+    // El studio legado queda intacto en /studio (mismo HTML y comportamiento de antes).
+    if (req.method === 'GET' && url.pathname === '/login') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(renderDashboardLoginHtml())
+      return
+    }
+    if (req.method === 'POST' && url.pathname === '/logout') {
+      // Cierre de sesión del dashboard: expira la cookie de studio (misma cookie HttpOnly)
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `${STUDIO_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+      })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/campaigns')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(renderDashboardAppHtml())
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/studio') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(renderCampaignStudioHtml())
       return
@@ -593,6 +621,24 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         }
       }
       return
+    }
+
+    // 14. (paridad dashboard) Endpoints del dashboard: resumen, contactos, etiquetas,
+    // respuestas rápidas, agentes, embudo, conversaciones/chat, ajustes, transporte,
+    // supresión y borrado/reintento de campañas. Nada de esto se toca arriba; si la
+    // ruta no es del dashboard, cae al 404 original.
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/studio/')) {
+      const handled = await handleDashboardApi(req, res, url, {
+        db,
+        identity: identity ?? { key: 'studio-session', org: null },
+        dispatcher,
+        lockChecker,
+        suppressionStore,
+        leadReplay,
+        leadRate,
+        leadSecretSpec,
+      })
+      if (handled) return
     }
 
     res.writeHead(404, { 'Content-Type': 'application/json' })
