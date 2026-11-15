@@ -15,28 +15,27 @@ for (const boton of $$('[data-menu]')) {
 }
 
 /* ---------- acordeón de preguntas ---------- */
-/* Cada pregunta es un <details>: abre al pulsar aunque el JavaScript no cargue. */
+/* Cada pregunta lleva role=tab, como el título del toggle del original; al pulsarla se abre su respuesta. */
 for (const caja of $$('[data-acordeon]')) {
-  for (const item of $$('details.item', caja)) {
-    const resumen = $('.pregunta', item)
-    if (!resumen) continue
-    const sincronizar = () => resumen.setAttribute('aria-expanded', String(item.open))
-    sincronizar()
-    /* se marca en el mismo clic (no solo en el evento toggle, que llega después),
-       para que cualquier comprobación lea el cambio de estado al instante */
-    resumen.addEventListener('click', () => {
-      resumen.setAttribute('aria-expanded', String(!item.open))
-    })
-    resumen.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' || ev.key === ' ') resumen.setAttribute('aria-expanded', String(!item.open))
-    })
-    item.addEventListener('toggle', sincronizar)
+  const items = $$('.item', caja)
+  const pintar = (item, si) => {
+    item.classList.toggle('abierto', si)
+    const enlace = $('.pregunta', item)
+    if (enlace) { enlace.setAttribute('aria-expanded', String(si)); enlace.setAttribute('aria-selected', String(si)) }
   }
-  for (const boton of $$('button.pregunta', caja)) {
-    boton.addEventListener('click', () => {
-      const item = boton.closest('.item')
-      const abierto = item.classList.toggle('abierto')
-      boton.setAttribute('aria-expanded', String(abierto))
+  for (const item of items) {
+    pintar(item, item.hasAttribute('data-abierto'))
+    const enlace = $('.pregunta', item)
+    if (enlace) enlace.addEventListener('click', (ev) => ev.preventDefault())
+    item.addEventListener('click', (ev) => {
+      if (ev.target.closest && ev.target.closest('.respuesta')) return
+      pintar(item, !item.classList.contains('abierto'))
+    })
+    item.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault()
+        pintar(item, !item.classList.contains('abierto'))
+      }
     })
   }
 }
@@ -44,7 +43,7 @@ for (const caja of $$('[data-acordeon]')) {
 /* ---------- pestañas de tema: resaltan y abren, nunca esconden ---------- */
 /* Esconder preguntas dejaba el acordeón vacío en móvil: ahora cada pestaña
    abre la primera pregunta de su tema y deja todas las demás a la vista. */
-const temas = $('[role="tablist"]')
+const temas = $('.temas[role="tablist"]')
 if (temas) {
   const items = $$('[data-acordeon] .item')
   for (const tab of $$('[role="tab"]', temas)) {

@@ -22,4 +22,5 @@ usage.json
 questions.json
 scripts/_*
 scripts/cleanup*.mjs
+scripts/limpiar*.mjs
 

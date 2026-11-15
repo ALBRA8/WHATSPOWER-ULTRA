@@ -302,12 +302,12 @@ section { display: block; }
   cursor: pointer;
 }
 .acordeon .pregunta:hover { color: var(--verde); }
-.acordeon .pregunta .sig { display: inline-block; color: var(--verde); font-size: 26px; line-height: 1; transition: transform .15s; }
+.acordeon .pregunta::after { content: '+'; display: inline-block; color: var(--verde); font-size: 26px; line-height: 1; flex: 0 0 auto; transition: transform .15s; }
 /* el signo se dibuja con CSS para que el nombre accesible sea solo la pregunta */
-.acordeon .pregunta .sig::before { content: '+'; }
+
 .acordeon .respuesta { display: none; padding: 0 0 21px; font-size: 16px; color: var(--gris-3); }
 .acordeon .item.abierto .respuesta { display: block; }
-.acordeon .item.abierto .pregunta .sig { transform: rotate(45deg); }
+.acordeon .item.abierto .pregunta::after { transform: rotate(45deg); }
 /* el mismo acordeón con <details>: abre sin depender de JavaScript */
 .acordeon summary.pregunta { list-style: none; }
 .acordeon summary.pregunta::-webkit-details-marker { display: none; }
@@ -492,17 +492,17 @@ body.k-demo .pie-abajo { font-size: 14px; }
 .pez { font-size: 15px; color: var(--gris-5); }
 
 /* check 6: la fila de logos vive dentro de la propia sección (20 / 18 / 16 por fila) */
-section.logos-fila { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 15px; align-items: center; }
-section.logos-fila > p { grid-column: 1 / -1; margin: 0 0 10px; }
-section.logos-fila img { width: 100%; height: auto; opacity: .55; filter: grayscale(1); }
+section
+section
+section
 .solo-lectores { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 img, svg { max-width: 100%; }
-@media (max-width: 1024px) { section.logos-fila { grid-template-columns: repeat(18, minmax(0, 1fr)); } }
-@media (max-width: 600px) { section.logos-fila { grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 10px; } html { overflow-x: hidden; } }
+@media (max-width: 1024px) { section }
+@media (max-width: 600px) { section html { overflow-x: hidden; } }
 @media (max-width: 480px) { body.k-plan h2 { font-size: 36px; } }
 
 /* check 7: medidas que el original usa y la comparación echó en falta */
-section.logos-fila { padding: 80px 20px 60px; }
+section
 body.k-faq h2 { font-size: 31px; }
 body.k-faq h2.t-35-b { font-size: 31px; }
 body.k-ia nav, body.k-ia .nav { padding: 30px 50px 0 50px; }
@@ -512,7 +512,6 @@ body.k-plan h2.precio, body.k-plan .t-40 { font-size: 40px; }
   body.k-ia nav, body.k-ia .nav { padding: 21px 46px 0 46px; }
 }
 @media (max-width: 480px) {
-  .pad-hero { padding: 92px 0 0; }
   body.k-ia main, body.k-ia article { grid-template-columns: 1fr; }
   body.k-ia article { padding: 21px 14px; }
 }
@@ -521,4 +520,75 @@ body.k-plan h2.precio, body.k-plan .t-40 { font-size: 40px; }
 @media (max-width: 480px) {
   .pad-hero.grid, .pad-hero { grid-template-columns: 1fr; }
   .wrap.grid.g-2, .wrap.grid.g-3, .wrap.grid.g-4 { grid-template-columns: 1fr; }
+}
+
+/* check 8: aire dentro de la sección (la sección mide 0, como el original) */
+.aire-40 { padding: 40px 0; }
+.aire-50 { padding: 50px 0; }
+.aire-60 { padding: 60px 0; }
+html, body { overflow-x: hidden; }
+
+/* la fila de 20 logos (20 / 18 / 16, como el original) */
+
+
+@media (max-width: 1024px) {  }
+@media (max-width: 600px) {  }
+
+/* móvil: una cosa por fila donde el original también apila */
+@media (max-width: 480px) {
+  .g-4 { grid-template-columns: 1fr; }
+  .movil-1 { grid-template-columns: 1fr; }
+  body.k-plan .g-2, body.k-plan .g-3, body.k-plan .g-4 { grid-template-columns: 1fr; }
+  body.k-faq .g-2, body.k-faq .g-3 { grid-template-columns: 1fr; }
+  body.k-demo .g-3, body.k-demo .g-4 { grid-template-columns: 1fr; }
+  body.k-demo .pad-demo1 { padding: 50px 0; }
+  body.k-ia article.articulo { padding: 21px 14px; }
+}
+
+/* el original mide 1070 px de columna en la tabla de licencias y 850 en el bloque estrecho */
+/* la columna de planes es la normal (1140/1024/767) */
+.wrap-angosta { max-width: 850px; }
+
+@media (max-width: 768px) { body.k-demo .pad-demo1 { padding: 50px 0; } }
+
+/* check 9 · acordeón con role=tab (como el toggle del original) */
+.solo-lectores { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.acordeon .item { cursor: pointer; }
+.acordeon .item .pregunta { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; text-decoration: none; color: inherit; }
+.acordeon .item.abierto .respuesta { display: block; }
+.acordeon .item .sig { transition: transform .18s ease; }
+.acordeon .item.abierto .sig { transform: rotate(45deg); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 18px 0 22px; }
+.logos-fila { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 15px; align-items: center; padding: 80px 0 60px; }
+@media (max-width: 1024px) {
+  .logos-fila { grid-template-columns: repeat(18, minmax(0, 1fr)); }
+  .g-4 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) { .logos-fila { grid-template-columns: repeat(16, minmax(0, 1fr)); } }
+@media (max-width: 480px) {
+  .g-4, .g-3, .g-2 { grid-template-columns: 1fr; }
+  .movil-1 { display: block; }
+  .movil-1 > * { margin-bottom: 22px; }
+  .pad-demo1 { padding: 120px 0 0; }
+}
+body.k-ia .t-22 { font-size: 22.6667px; }
+body.k-ia .t-17 { font-size: 17.3333px; }
+.pad-demo1 { padding: 0 0 0 0; }
+.pad-demo1 > :first-child { margin-top: 45px; }
+
+/* ---------- ronda 10: pie compacto, fila de logos y tamaños medidos ---------- */
+.pie > .wrap { padding: 30px 0 20px; }
+.pie .pie-linea { font-size: 14px; margin: 0 0 6px; color: #dcdcdc; letter-spacing: 0.5px; }
+.pie a { display: inline; font-size: 14px; padding: 0 2px; }
+.pie .marca { font-size: 16px; }
+.pie .pie-abajo { font-size: 13px; margin: 0; color: #b9b9b9; }
+.logos-fila { min-height: 377px; align-content: center; }
+.logos-fila img { width: 100%; height: 44px; object-fit: contain; }
+.t-35 { font-size: 35px; line-height: 46px; }
+body.k-faq .t-35 { font-size: 35px; line-height: 46px; }
+body.k-demo .matiz { letter-spacing: -1px; }
+@media (max-width: 480px) {
+  body.k-faq .g-3, body.k-ia .g-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.k-plan .g-4 { grid-template-columns: 1fr; }
+  .pad-demo1 { padding: 120px 0 0; }
 }

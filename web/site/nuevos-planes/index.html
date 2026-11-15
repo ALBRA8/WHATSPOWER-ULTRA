@@ -25,20 +25,20 @@
 </style>
 </head>
 <body class="k-plan">
-<header class="cabecera">
+<div class="cabecera">
   <div class="wrap wrap-cabecera">
     <a class="marca" href="../"><img src="../img/marca.svg" alt="Marca de WhatsOn">WhatsOn</a>
     <button class="burger" type="button" data-menu aria-expanded="false" aria-controls="menu">Menú</button>
-    <nav class="menu" id="menu" aria-label="Navegación principal">
+    <div class="menu" id="menu" aria-label="Navegación principal">
       <a href="../">Inicio</a>
       <a href="./" aria-current="page">Planes</a>
       <a href="../faq/">Preguntas</a>
       <a href="../chatgptwhatson-alianza-perfecta/">Alianza IA</a>
       <a href="../nueva-demo/">Demo</a>
       <a class="btn btn-primario btn-sm" href="./">Adquirir Ahora!!</a>
-    </nav>
+    </div>
   </div>
-</header>
+</div>
 
 <main id="main">
 <article>
@@ -52,7 +52,7 @@
     </div>
   </section>
 
-  <section class="pad-0" style="padding:60px 0 60px"><div class="wrap">
+  <section class="pad-0"><div class="aire-60"><div class="wrap">
       <h2 class="centrado" style="color:#009430">Elige el mejor plan para ti</h2>
       <p class="centrado">Todos los planes incluyen envíos ilimitados, carga de contactos por CSV y reporte descargable de cada campaña. Los precios están en euros; el cambio a dólares es informativo.</p>
       <p class="centrado t-24">Prueba gratis 30 días · soporte vía correo · sólo se paga por la licencia</p>
@@ -146,9 +146,9 @@
       </div>
     </div>
     </div>
-  </section>
+  </div></section>
 
-  <section class="pad-0 f-gris" style="padding:50px 0 50px"><div class="wrap">
+  <section class="pad-0 f-gris" id="licencias"><div class="aire-50"><div class="wrap">
       <h2 class="centrado">Qué incluye cada licencia</h2>
       <div class="tabla-scroll mt30">
       <table class="tabla">
@@ -168,11 +168,13 @@
       <p class="centrado" style="font-size:14px">Si facturas en dolares, usa la tabla en USD. El envio se cobra por licencia, nunca por mensaje.</p>
       <p class="centrado mt30"><a class="btn btn-suave" href="../faq/" style="font-size:16px">Saber más..</a></p>
     </div>
-  </section>
+  </div></section>
 
-  <section class="pad-0" style="padding:50px 0 50px"><div class="wrap">
+  <section class="pad-0"><div class="aire-50"><div class="wrap">
       <p class="ls-12" style="font-size:14px;color:#54595f;margin-bottom:10px">FAQ</p>
-      <h2>Antes de elegir, lo que conviene saber</h2>
+      <p>Cualquier plan se puede cambiar en la siguiente renovación y todos incluyen soporte en español. Si dudas entre dos, pide una demo: la decisión se toma mejor viendo el panel con tus propios contactos.</p>
+        <p class="btn-row"><a class="btn btn-primario" href="../nueva-demo/">Pedir una demo</a> <a class="btn btn-borde" href="../faq/">Preguntas frecuentes</a> <a class="btn btn-borde" href="../app/">Abrir el panel</a> <a class="btn btn-borde" href="../chatgptwhatson-alianza-perfecta/">Guía de IA</a></p>
+        <h2>Antes de elegir, lo que conviene saber</h2>
       <p>Si tienes dudas, esta parte suele resolverse antes de la contratación: el aviso legal, las condiciones del plan y el copyright del contenido que subes. Todo está en las preguntas frecuentes, y también queda escrito en el blog.</p>
       <p>La subscripción se cobra cada mes y se puede detener cuando quieras. Tus contactos siguen siendo tuyos: si te vas, te llevas la lista. Los SMS de aviso se cobran aparte, solo si decides usarlos.</p>
       <p>
@@ -212,11 +214,12 @@
       <h2 class="mb0" style="font-size:31px">¿Hablamos antes de comprar?</h2>
       <p class="mb0" style="text-align:right"><a class="btn btn-primario" href="../nueva-demo/" style="font-size:15px;min-height:44px">Pedir una demo</a></p>
     </div>
+  </div>
   </section>
   <!-- dudas de compra: cuatro salidas -->
-  <section class="pad-block f-gris">
+  <div class="pad-block f-gris">
     <div class="wrap">
-      <h2 style="font-size:40px;letter-spacing:-1px">¿Todavía con dudas?</h2>
+      <h2 style="font-size:42px;letter-spacing:-1px">¿Todavía con dudas?</h2>
       <div class="grid g-2 g-medio" style="gap:12px">
         <div>
           <p>Escríbenos y te decimos qué licencia encaja con el volumen que mueves: un mes para probar, un año si ya sabes que lo vas a usar, o Premium si tienes varias cuentas y equipo.</p>
@@ -234,26 +237,16 @@
         </div>
       </div>
     </div>
-  </section>
+  </div>
 
 </article>
 </main>
 
 <footer class="pie">
   <div class="wrap">
-    <div class="grid g-4">
-      <div>
-        <a class="marca" href="../" style="color:#fff"><img src="../img/marca.svg" alt="" width="40" height="40">WhatsOn</a>
-        <p style="font-size:15px;margin-top:15px">Software de marketing por WhatsApp con chatbot y envíos ilimitados.</p>
-      </div>
-      <div><h2>Producto</h2><a href="./">Planes</a><a href="../faq/">Preguntas</a><a href="../nueva-demo/">Demo</a></div>
-      <div><h2>Recursos</h2><a href="../chatgptwhatson-alianza-perfecta/">Alianza con IA</a><a href="../">Inicio</a><a href="../app/">Panel</a></div>
-      <div><h2>Legal</h2><a href="../faq/">Privacidad</a><a href="../faq/">Condiciones</a><a href="../faq/">Bajas</a></div>
-    </div>
-    <div class="pie-abajo">
-      <span>© <span data-anio>2025</span> WhatsOn · Demo de reconstrucción</span>
-      <span>Precios de ejemplo</span>
-    </div>
+    <p class="pie-linea"><a class="marca" href="../" style="color:#fff"><img src="../img/marca.svg" alt="" width="30" height="30">WhatsOn</a> <span>Software de marketing por WhatsApp con chatbot y envíos ilimitados.</span></p>
+    <p class="pie-linea">Producto: <a href="../nuevos-planes/">Planes</a> · <a href="../faq/">Preguntas</a> · <a href="../nueva-demo/">Demo</a> · Recursos: <a href="../chatgptwhatson-alianza-perfecta/">Alianza con IA</a> · <a href="../faq/">Ayuda</a> · <a href="../app/">Panel</a> · Legal: <a href="../faq/">Privacidad</a> · <a href="../faq/">Condiciones</a> · <a href="../faq/">Bajas</a></p>
+    <p class="pie-abajo">© <span data-anio>2025</span> WhatsOn · Demo de reconstrucción · Colores y estructura tomados del sitio original</p>
   </div>
 </footer>
 
