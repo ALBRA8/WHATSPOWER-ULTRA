@@ -90,7 +90,7 @@ export function renderCampaignStudioHtml(): string {
       <div>
         <div class="brand-title">WhatsPower-Ultra Campaign Studio</div>
       </div>
-      <span class="brand-sub">Nivel 3 · WhatsOn + WATI + SleekFlow</span>
+      <span class="brand-sub">Nivel 3 · Difusión masiva con salvaguardas</span>
     </div>
 
     <div class="nav-tabs">
