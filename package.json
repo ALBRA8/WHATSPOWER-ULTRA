@@ -14,7 +14,8 @@
     "test:e2e": "node scripts/run-tests.mjs",
     "security:scan": "node scripts/scan-secrets.mjs",
     "tsc": "tsc --noEmit -p tsconfig.json",
-    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts"
+    "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts",
+    "security:scan:history": "node scripts/scan-secrets-history.mjs --history"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
