@@ -135,12 +135,19 @@ invalido123,Descartado`
     await new Promise<void>((resolve) => server.listen(3019, () => resolve()))
 
     try {
-      // 1. GET /
+      // 1. GET / — (paridad dashboard 2026-11-15) sirve el DASHBOARD completo de
+      // paridad (sidebar + 10 pantallas). El studio legado NO se pierde: queda
+      // intacto y verificado en /studio (mismo HTML y login por canje).
       const resStudio = await fetch('http://localhost:3019/')
       assert.strictEqual(resStudio.status, 200)
       const html = await resStudio.text()
-      assert.ok(html.includes('WhatsPower-Ultra Campaign Studio'))
-      assert.ok(html.includes('Escudo Anti-Ban'))
+      assert.ok(html.includes('WhatsPower-Ultra'))
+      assert.ok(html.includes('viewRoot'), 'el dashboard de paridad monta la vista raíz')
+      const resLegacy = await fetch('http://localhost:3019/studio')
+      assert.strictEqual(resLegacy.status, 200)
+      const legacyHtml = await resLegacy.text()
+      assert.ok(legacyHtml.includes('WhatsPower-Ultra Campaign Studio'))
+      assert.ok(legacyHtml.includes('Escudo Anti-Ban'))
 
       // 2. POST /api/spintax/preview (autenticado)
       const resSpintax = await fetch('http://localhost:3019/api/spintax/preview', {

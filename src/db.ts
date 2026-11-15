@@ -224,6 +224,140 @@ export function createBroadcastDatabase(dbPath?: string): DatabaseSync {
     `)
   }
 
+  // ============================================================
+  // PARIDAD DASHBOARD (parity/matriz.md — Fase 3, 2026-11-15): tablas para las
+  // pantallas que el dashboard añade (contactos, conversaciones/chat, embudo,
+  // respuestas rápidas, etiquetas, agentes, ajustes y transporte por org).
+  // TODAS aditivas (IF NOT EXISTS), sin tocar el esquema vigente del motor de
+  // broadcast. Convenciones: created_at/updated_at en SEGUNDOS (igual que
+  // audit_log); teléfonos canónicos E.164 SIN '+' (igual que csv-importer);
+  // TODO org-scoped (organization_id) como el resto del esquema v4/v5.
+  // ============================================================
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      organization_id TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      name TEXT,
+      email TEXT,
+      stage_id TEXT,
+      source TEXT NOT NULL DEFAULT 'manual', -- manual | csv | lead
+      notes TEXT,
+      last_broadcast_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, phone)
+    );
+
+    CREATE TABLE IF NOT EXISTS tags (
+      organization_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS contact_tags (
+      organization_id TEXT NOT NULL,
+      contact_phone TEXT NOT NULL,
+      tag_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, contact_phone, tag_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS quick_replies (
+      organization_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      shortcut TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      organization_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT,
+      role TEXT NOT NULL DEFAULT 'agente', -- admin | agente
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS conversations (
+      organization_id TEXT NOT NULL,
+      contact_phone TEXT NOT NULL,
+      contact_name TEXT,
+      last_message_at INTEGER NOT NULL,
+      last_message_text TEXT,
+      last_direction TEXT NOT NULL DEFAULT 'outbound', -- inbound | outbound
+      unread INTEGER NOT NULL DEFAULT 0,
+      assigned_agent_id TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, contact_phone)
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      organization_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      conversation_phone TEXT NOT NULL,
+      direction TEXT NOT NULL, -- inbound | outbound
+      text TEXT NOT NULL,
+      status TEXT NOT NULL, -- SENT | FAILED | RECEIVED
+      source TEXT NOT NULL DEFAULT 'chat', -- chat | campaign | webhook
+      campaign_id TEXT,
+      message_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pipeline_stages (
+      organization_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      color TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (organization_id, id)
+    );
+
+    -- Configuración de transporte NO SECRETA por organización (paridad:
+    -- pantalla Integraciones). Los SECRETOS jamás se persisten: solo máscara
+    -- de últimos 4 caracteres para pintar el estado; las credenciales reales
+    -- viven en el entorno (ADMIN/META_ORG_CREDENTIALS/INTERNAL_API_SECRET).
+    CREATE TABLE IF NOT EXISTS org_transport_config (
+      organization_id TEXT PRIMARY KEY,
+      engine TEXT NOT NULL DEFAULT 'daemon', -- daemon | meta_cloud
+      daemon_url TEXT,
+      meta_phone_number_id TEXT,
+      daemon_secret_last4 TEXT,
+      meta_token_last4 TEXT,
+      updated_at INTEGER NOT NULL
+    );
+
+    -- Ajustes del dashboard por organización (perfil, ritmo por defecto,
+    -- onboarding). Valores por defecto en dashboard/store.ts.
+    CREATE TABLE IF NOT EXISTS org_settings (
+      organization_id TEXT PRIMARY KEY,
+      brand_name TEXT,
+      country TEXT,
+      pacing_min_seconds INTEGER,
+      pacing_max_seconds INTEGER,
+      cooldown_batch_size INTEGER,
+      onboarding_completed_at INTEGER,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contacts_org_created ON contacts(organization_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_contact_tags_tag ON contact_tags(organization_id, tag_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(organization_id, conversation_phone, created_at);
+    CREATE INDEX IF NOT EXISTS idx_conversations_org_last ON conversations(organization_id, last_message_at DESC);
+  `)
+
   return db
 }
 

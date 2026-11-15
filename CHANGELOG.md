@@ -1,48 +1,39 @@
 # CHANGELOG
 
-## 2026-11-15 — Producción real: verificación total, escáner de historial y throttler ajustable (rama repair/produccion-real)
+## 2026-11-15 — Paridad de dashboard (encargo «PROMPT PARA EL CONSTRUCTOR», 5 fases)
 
-### Mejoras (con verificación ejecutada)
-- **Throttler ajustable por entorno** (`src/queue/throttler.ts`): `BUSINESS_HOURS_START/END`, `BUSINESS_HOURS_TZ`, `THROTTLE_MIN/MAX_INTERVAL_MS`, `THROTTLE_BATCH_SIZE`, `THROTTLE_COOLDOWN_MS`. **Defaults idénticos al comportamiento histórico** (8-18 Bogotá, 15-35 s, lote 25, cooldown 5 min): sin variables, cero cambio. Habilita el E2E fuera de horario y despliegues con ventanas distintas. Suite 194/194.
-- **Escáner de historial git completo** (`scripts/scan-secrets-history.mjs` + `npm run security:scan:history`): resultado **0 hallazgos** — el historial de ULTRA está limpio desde su creación.
+### Añadido (todo ADITIVO sobre el motor de broadcast existente)
+- Dashboard completo en `/` (y `/campaigns`) con 10 pantallas: Resumen, Conversaciones/Chat,
+  Contactos, Embudo (kanban), Campañas (lista + creador/monitor existentes reutilizados),
+  Respuestas rápidas, Etiquetas, Agentes, Integraciones y Ajustes. Login dedicado `/login`
+  (canje `/studio/login` por cookie HttpOnly), `/logout`, interceptor 401 → `/login?expired=1`.
+  El studio legado queda intacto en `/studio`.
+- Tablas nuevas (aditivas, `IF NOT EXISTS`): contacts, tags, contact_tags, quick_replies,
+  agents, conversations, messages, pipeline_stages, org_transport_config, org_settings.
+- Endpoints nuevos bajo la puerta de autenticación existente: dashboard/summary, settings,
+  contacts (CRUD + import-csv persistente + export.csv), tags, quick-replies, agents,
+  pipeline/stages + move idempotente (eventId), conversations + messages (envío REAL con
+  supresión + lock 2A + transporte), webhook de mensajes entrantes HMAC v2
+  (`/api/audiences/webhook-message`), integrations/transport (+ test de conexión real),
+  suppression (alta/baja), campaigns DELETE (solo terminal) y retry-failed.
+- Carpeta `parity/`: inventario del original, matriz archivo:línea, verificación con clics
+  (20/20, 25 capturas) y remate (handoff). Pruebas nuevas: `tests/dashboard-parity.test.ts`
+  (22 pruebas DP-01…DP-22).
 
-### Verificación total de esta sesión
-- Suite: **194/194** (36 suites, incluye fase1 Meta Cloud, fase2 consentimiento JIT, H7-H10) · tsc 0 errores · `npm audit` 0 vulnerabilidades.
-- **E2E de los 3 servicios reales juntos** (18/18 PASS): campaña ULTRA activada por `/resume` (DRAFT→RUNNING), contacto con lock en WP → `LOCK_EXCLUDED` (checker 2B→2A real), sin consentimiento → `SKIPPED_NO_CONSENT`, válido → bloqueado por salvaguarda con `SENT=0`.
-- **Campaign Studio en navegador real** (Playwright 11/11 con WP): carga, Historial (`logTbody`), métricas sent/failed/skipped/total, vista móvil 390px sin desbordamiento.
-- **Higiene studio:** retirada la afirmación "Nivel 3 · WhatsOn + WATI + SleekFlow" del Campaign Studio.
+### Corregido durante la verificación real
+- Sondeo del chat reconstruía el hilo y destruía el compositor mientras se escribía →
+  `pollActiveThread()` refresca solo mensajes y espera si hay texto.
+- `ensureConversation` no idempotente → responder a una conversación existente daba 400
+  (UNIQUE) después de despachar; ahora `INSERT OR IGNORE` + prueba DP-15 ampliada.
+- Contactos nuevos/CSV/leads sin etapa → kanban vacío; nacen en la primera etapa.
 
-### Límites honestos
-- Docker compose NO ejecutado (sin docker en el entorno; OWNER_TODO §4). Ningún envío real; ALLOW_REAL_DISPATCH=false siempre.
-
-
-## 2026-11-15 — Preparación para Producción Real (rama repair/produccion-real)
-
-### Fase 1 — Canal Oficial de WhatsApp
-- **Meta Cloud API por defecto:** Integración de Meta Cloud API para difusión oficial por organización con resolución de números y tokens dedicados.
-- **Ventana de 24 horas y Plantillas:** Almacén de ventana y registro de plantillas, bloqueando difusiones no transaccionales fuera de ventana.
-- **Clasificación de Errores Meta:** Manejo riguroso de límites de velocidad, plantillas rechazadas y estados `UNCERTAIN` sin reintentos ciegos.
-
-### Fase 2 — Consentimiento y Cumplimiento Normativo (Ley 1581)
-- **ConsentStore:** Registro de autorización previa y trazabilidad auditable (`consent_records` y `consent_audit_log`).
-- **JIT Guard en Despacho:** Validación pre-despacho (<50ms): ítems sin consentimiento transitan a `SKIPPED_NO_CONSENT`.
-- **Importador CSV:** Parámetro `consent_origin` obligatorio en cada registro importado.
-- **Bajas y Habeas Data:** Revocación automática de consentimiento ante bajas; endpoints de exportación y borrado de datos.
-- **Rastreo de Clics Anónimo:** Validación de `TRUST_PROXY === 'true'` y almacenamiento de IP hasheada con SHA-256 de 16 caracteres.
-
-### Fase 3 — Estabilidad, Capacidad y Operaciones
-- **Alineación de Entorno:** Node `>=22.12.0` (engines), `.nvmrc` (`22.14.0`), Dockerfile (`node:22-alpine`) y CI (`node-version: 22`).
-- **Runner de Pruebas Multiplataforma:** `scripts/run-tests.mjs` ejecutando los 20 archivos de prueba limpiamente en Windows y Linux.
-- **Benchmark SQLite:** Verificada capacidad de 70,914 inserts/s en batch y 2,541 claims de cola/s en SQLite WAL, cubriendo con creces la demanda sin requerir Postgres.
-- **Healthcheck Operativo:** `/api/health` con métricas de colas, sent/failed/uncertain y memoria.
-- **Runbook:** Guía operativa de producción en `docs/RUNBOOK.md`.
-
-### Fase 4 y 5 — Higiene y Verificación
-- Sanitización de datos personales en scripts, contratos y tests.
-- Eliminadas afirmaciones engañosas de paridad WhatsOn/WATI en `README.md` y `FICHA.md`.
-- 36 suites de prueba pasando (194/194 pruebas superadas al 100%). TypeScript 0 errores.
+### Verificación
+- 196/196 pruebas (174 previas intactas), `tsc --noEmit` limpio, `security:scan` limpio.
+- Verificación con navegador real en escritorio y 390 px: 20/20 pasos (parity/verificacion.md).
 
 ---
+
+## 2026-11-15 — Producción real: verificación total, escáner de historial y throttler ajustable (rama repair/produccion-real)
 
 ## 2026-11-11/12 — Auditoría integral: ciclos 1 y 2 (rama impl/audit-20261111)
 

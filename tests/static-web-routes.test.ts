@@ -53,8 +53,8 @@ test('RUTAS ESTÁTICAS: Panel de control (/app/) y Sitio público (/sitio/)', as
       assert.strictEqual(resBad.status, 404)
     })
 
-    await t.test('WEB-05: Campaign Studio (/) incluye pestaña de navegación hacia el Panel', async () => {
-      const resStudio = await fetch(`http://localhost:${PORT}/`)
+    await t.test('WEB-05: Campaign Studio (/studio) incluye pestaña de navegación hacia el Panel', async () => {
+      const resStudio = await fetch(`http://localhost:${PORT}/studio`)
       assert.strictEqual(resStudio.status, 200)
       const html = await resStudio.text()
       assert.ok(html.includes('href="/app/"'))

@@ -1,0 +1,122 @@
+[
+  {
+    "id": "V-01",
+    "name": "Pantalla de login dedicada (desktop)",
+    "pass": true,
+    "detail": "formulario visible sin window.prompt"
+  },
+  {
+    "id": "V-02",
+    "name": "Onboarding guiado 3 pasos con prueba REAL de transporte",
+    "pass": true,
+    "detail": "transporte probado contra daemon stub: conexión OK real"
+  },
+  {
+    "id": "V-03",
+    "name": "Resumen con métricas reales (estado vacío inicial)",
+    "pass": true,
+    "detail": "tarjetas de métricas visibles"
+  },
+  {
+    "id": "V-04",
+    "name": "Contactos: crear con validación E.164",
+    "pass": true,
+    "detail": "alta OK + rechazo de teléfono inválido"
+  },
+  {
+    "id": "V-05",
+    "name": "Contactos: importación CSV persistente con desglose",
+    "pass": true,
+    "detail": "desglose válido/duplicado/inválido + fila persistida"
+  },
+  {
+    "id": "V-06",
+    "name": "Contactos: editar y borrar (con confirmación)",
+    "pass": true,
+    "detail": "edición persistente + borrado con confirmación"
+  },
+  {
+    "id": "V-07",
+    "name": "Etiquetas: crear, asignar desde contactos y filtrar",
+    "pass": true,
+    "detail": "etiqueta VIP creada y asignada con chip visible"
+  },
+  {
+    "id": "V-08",
+    "name": "Respuestas rápidas: crear /precio y ver en tabla",
+    "pass": true,
+    "detail": "atajo /precio persistido"
+  },
+  {
+    "id": "V-09",
+    "name": "Agentes: crear agente con rol",
+    "pass": true,
+    "detail": "agente creado (rol agente)"
+  },
+  {
+    "id": "V-10",
+    "name": "Embudo: etapas por defecto y mover tarjeta con arrastre",
+    "pass": true,
+    "detail": "tarjeta movida a Contactado y PERSISTE tras recargar"
+  },
+  {
+    "id": "V-11",
+    "name": "Chat: inbound real (HMAC) llega con badge de no leído",
+    "pass": true,
+    "detail": "webhook HMAC v2 → conversación con 1 no leído"
+  },
+  {
+    "id": "V-12",
+    "name": "Chat: abrir hilo (marca leído), respuesta rápida y envío REAL",
+    "pass": true,
+    "detail": "despachado por el transporte (daemon stub lo recibió) y persistido como outbound"
+  },
+  {
+    "id": "V-13",
+    "name": "Chat: contacto suprimido NO recibe mensajes (opt-out real)",
+    "pass": true,
+    "detail": "409 visible en UI y cero envíos al daemon"
+  },
+  {
+    "id": "V-14",
+    "name": "Campañas: creador completo + monitor con envío real",
+    "pass": true,
+    "detail": "campaña creada por UI + spintax + despachos reales con monitor en vivo"
+  },
+  {
+    "id": "V-15",
+    "name": "Campañas: lista con acciones (pausar, reintentar, borrar terminal)",
+    "pass": true,
+    "detail": "lista con contadores y botones por estado"
+  },
+  {
+    "id": "V-16",
+    "name": "Integraciones: probar conexión REAL y guardar config",
+    "pass": true,
+    "detail": "test de conexión real OK (latencia) + config guardada con máscara"
+  },
+  {
+    "id": "V-17",
+    "name": "Ajustes: guardar ritmo por defecto",
+    "pass": true,
+    "detail": "pacing 25-50 persistido (org_settings)"
+  },
+  {
+    "id": "V-18",
+    "name": "Sesión caducada: 401 → redirección a /login con aviso",
+    "pass": true,
+    "detail": "interceptor de 401 funcionó con aviso visible"
+  },
+  {
+    "id": "V-19",
+    "name": "Móvil 390px: login y navegación con menú hamburguesa",
+    "pass": true,
+    "detail": "sidebar colapsable + navegación táctil funciona"
+  },
+  {
+    "id": "V-20",
+    "name": "Móvil 390px: chat y kanban usables",
+    "pass": true,
+    "detail": "vistas clave usables en 390px"
+  }
+]
