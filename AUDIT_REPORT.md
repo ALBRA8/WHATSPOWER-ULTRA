@@ -1,5 +1,43 @@
 # AUDIT_REPORT — WHATSPOWER-ULTRA
 
+## Actualización 2026-11-15 — Producción real (rama `repair/produccion-real`)
+
+**Método:** línea base completa ejecutada sobre la rama (FASE 1-4 de la sesión anterior re-verificadas en verde), mejora operativa con suite completa, E2E con los 3 servicios reales en simulación y prueba de studio en navegador real.
+
+### Línea base (ejecutada en esta sesión)
+| Verificación | Resultado |
+|---|---|
+| `tsc --noEmit` | 0 errores |
+| Suite (node:test) | **194/194** en 36 suites (incluye fase1 Meta Cloud, fase2 consentimiento/CSV/bajas, H7-H10, cuarentena NULL-org) |
+| `npm audit` | 0 vulnerabilidades |
+| `security:scan` (árbol) | LIMPIO |
+| `security:scan:history` (NUEVO) | **0 hallazgos** — historial git completo limpio desde la creación |
+
+### Hallazgos / cambios de esta sesión
+
+| ID | Severidad | Descripción | Estado | Evidencia |
+|---|---|---|---|---|
+| F6-U1 | BAJA | Ventanas horarias y pacing hard-coded (impedía E2E fuera de horario y ajustes por despliegue) | ✅ MEJORADO | `throttler.ts` configurable por env con defaults idénticos al histórico; suite 194/194 |
+| F6-U2 | BAJA | Afirmación de paridad "WhatsOn + WATI + SleekFlow" en el Campaign Studio | ✅ CORREGIDO | Subtítulo neutral; suite en verde |
+| F6-U3 | INFO | ULTRA carecía de escáner de historial git | ✅ CORREGIDO | `security:scan:history` → 0 hallazgos |
+| F6-U4 | INFO | Activación de campaña: `/resume` es el camino DRAFT→RUNNING (documentado en E2E) | ✅ DOCUMENTADO | `scripts` del E2E + RUNBOOK heredan la nota |
+
+### E2E 3 servicios reales (18/18 PASS, simulación, cero envíos reales)
+- Campaña creada con 3 contactos → activada (`/resume` DRAFT→RUNNING) → despacho por pasos con pacing real:
+  - Contacto con lock en WP → `LOCK_EXCLUDED` (Http2ALockChecker real contra WP).
+  - Contacto sin consentimiento → `SKIPPED_NO_CONSENT` (JIT guard FASE 2).
+  - Contacto válido con consentimiento → intento de despacho → `FAILED_FATAL` por salvaguarda `ALLOW_REAL_DISPATCH=false`.
+  - `SENT=0` en toda la campaña; worker persistente con parada graciosa verificada (SIGTERM).
+
+### Campaign Studio en navegador (Playwright/Chromium)
+Carga 200, Historial (`logTbody`) presente, métricas sent/failed/skipped/total presentes, vista móvil 390px sin desbordamiento. Prueba conjunta 11/11 con el Flow Studio de WP.
+
+### Pendientes (no bloqueados por código)
+- Docker compose en el PC del dueño (sin docker aquí) → `OWNER_TODO.md` §4.
+- Cuenta Meta Business + número oficial + plantillas → `OWNER_TODO.md` §2.
+
+---
+
 ## Segunda reparación integral — 2026-11-06 (rama `fix/segunda-reparacion-integral`)
 
 Nueva orden de trabajo (fase 2). Causas raíz corregidas y evidencia por bloque:

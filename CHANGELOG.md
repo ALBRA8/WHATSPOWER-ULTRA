@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-11-15 — Producción real: verificación total, escáner de historial y throttler ajustable (rama repair/produccion-real)
+
+### Mejoras (con verificación ejecutada)
+- **Throttler ajustable por entorno** (`src/queue/throttler.ts`): `BUSINESS_HOURS_START/END`, `BUSINESS_HOURS_TZ`, `THROTTLE_MIN/MAX_INTERVAL_MS`, `THROTTLE_BATCH_SIZE`, `THROTTLE_COOLDOWN_MS`. **Defaults idénticos al comportamiento histórico** (8-18 Bogotá, 15-35 s, lote 25, cooldown 5 min): sin variables, cero cambio. Habilita el E2E fuera de horario y despliegues con ventanas distintas. Suite 194/194.
+- **Escáner de historial git completo** (`scripts/scan-secrets-history.mjs` + `npm run security:scan:history`): resultado **0 hallazgos** — el historial de ULTRA está limpio desde su creación.
+
+### Verificación total de esta sesión
+- Suite: **194/194** (36 suites, incluye fase1 Meta Cloud, fase2 consentimiento JIT, H7-H10) · tsc 0 errores · `npm audit` 0 vulnerabilidades.
+- **E2E de los 3 servicios reales juntos** (18/18 PASS): campaña ULTRA activada por `/resume` (DRAFT→RUNNING), contacto con lock en WP → `LOCK_EXCLUDED` (checker 2B→2A real), sin consentimiento → `SKIPPED_NO_CONSENT`, válido → bloqueado por salvaguarda con `SENT=0`.
+- **Campaign Studio en navegador real** (Playwright 11/11 con WP): carga, Historial (`logTbody`), métricas sent/failed/skipped/total, vista móvil 390px sin desbordamiento.
+- **Higiene studio:** retirada la afirmación "Nivel 3 · WhatsOn + WATI + SleekFlow" del Campaign Studio.
+
+### Límites honestos
+- Docker compose NO ejecutado (sin docker en el entorno; OWNER_TODO §4). Ningún envío real; ALLOW_REAL_DISPATCH=false siempre.
+
+
 ## 2026-11-15 — Preparación para Producción Real (rama repair/produccion-real)
 
 ### Fase 1 — Canal Oficial de WhatsApp
