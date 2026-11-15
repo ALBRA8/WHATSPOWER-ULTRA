@@ -14,6 +14,8 @@
     "test:e2e": "node scripts/run-tests.mjs",
     "security:scan": "node scripts/scan-secrets.mjs",
     "tsc": "tsc --noEmit -p tsconfig.json",
+    "build": "node scripts/build-site.mjs",
+    "build:all": "npm run tsc && npm run build",
     "test:security": "node --experimental-strip-types --test tests/pilot-safeguards.test.ts tests/bajas-circuit.test.ts",
     "security:scan:history": "node scripts/scan-secrets-history.mjs --history"
   },

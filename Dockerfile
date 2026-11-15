@@ -6,6 +6,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json ./
 COPY src ./src
+COPY web ./web
 COPY tests ./tests
 # Se ejecuta como usuario sin privilegios; los volúmenes montados
 # (db/) deben ser escribibles por uid 1000.

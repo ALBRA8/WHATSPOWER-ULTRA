@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel · WhatsPower Ultra</title>
+  <meta name="description" content="Panel de control de difusión por WhatsApp: contactos, campañas, chatbot, reportes y control anti-bloqueo.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <a class="skip" href="#vista">Ir al contenido</a>
+
+  <div class="app-shell" id="appShell">
+    <aside class="sidebar" id="sidebar" aria-label="Menú principal">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <span class="brand-text">
+          <strong>WhatsPower</strong>
+          <small>Ultra · Difusión masiva</small>
+        </span>
+      </div>
+
+      <nav class="nav" id="nav" aria-label="Secciones del panel">
+        <a class="nav-item" href="#/panel"><span class="nav-ico" aria-hidden="true">▦</span> Panel</a>
+        <a class="nav-item" href="#/campanas"><span class="nav-ico" aria-hidden="true">➤</span> Campañas</a>
+        <a class="nav-item" href="#/contactos"><span class="nav-ico" aria-hidden="true">☰</span> Contactos</a>
+        <a class="nav-item" href="#/plantillas"><span class="nav-ico" aria-hidden="true">✎</span> Plantillas</a>
+        <a class="nav-item" href="#/chatbot"><span class="nav-ico" aria-hidden="true">⚙</span> Chatbot</a>
+        <a class="nav-item" href="#/bandeja"><span class="nav-ico" aria-hidden="true">✉</span> Bandeja</a>
+        <a class="nav-item" href="#/reportes"><span class="nav-ico" aria-hidden="true">▤</span> Reportes</a>
+        <a class="nav-item" href="#/enlaces"><span class="nav-ico" aria-hidden="true">🔗</span> Enlaces</a>
+        <a class="nav-item" href="#/bajas"><span class="nav-ico" aria-hidden="true">⊘</span> Bajas</a>
+        <a class="nav-item" href="#/ajustes"><span class="nav-ico" aria-hidden="true">⚒</span> Ajustes</a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="conn" id="connChip" title="Estado de la conexión con el servidor">
+          <span class="dot" id="connDot"></span>
+          <span id="connText">Comprobando…</span>
+        </div>
+        <a class="sidebar-link" href="/sitio/">Ver sitio público</a>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menuBtn" aria-label="Abrir menú" aria-expanded="false" aria-controls="sidebar">☰</button>
+        <div class="topbar-title">
+          <h1 id="viewTitle">Panel</h1>
+          <p id="viewSub">Resumen de tu operación</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-ghost" id="connBtn">Conectar servidor</button>
+          <button class="btn btn-primary" id="newBtn">+ <span class="long">Nueva</span> campaña</button>
+        </div>
+      </header>
+
+      <main id="vista" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="modal-root" id="modalRoot" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <header class="modal-head">
+        <h2 id="modalTitle">Título</h2>
+        <button class="icon-btn" id="modalClose" aria-label="Cerrar">✕</button>
+      </header>
+      <div class="modal-body" id="modalBody"></div>
+      <footer class="modal-foot" id="modalFoot"></footer>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

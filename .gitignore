@@ -10,3 +10,15 @@ db/
 capture/
 inbox/
 dist/
+# Sitio estático generado por `npm run build` (se reconstruye, no se versiona)
+build/
+public/
+checks/
+investigation.cany/
+craft.json
+feed.json
+transcript.json
+usage.json
+questions.json
+scripts/_*
+
