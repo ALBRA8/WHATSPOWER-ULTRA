@@ -38,7 +38,7 @@ function panelBases (): string[] {
 
 /** Raíces del sitio público, en orden de preferencia. */
 function siteBases (): string[] {
-  return [...BUILD_ROOTS, join(WEB_ROOT, 'site')]
+  return [...BUILD_ROOTS, join(WEB_ROOT, 'sitio'), join(WEB_ROOT, 'site')]
 }
 
 const STATIC_TYPES: Record<string, string> = {

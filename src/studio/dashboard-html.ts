@@ -22,28 +22,48 @@ export function renderDashboardLoginHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WhatsPower-Ultra · Acceso</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2310b981'/%3E%3Cpath d='M16 6 L25 11 V21 L16 26 L7 21 V11 Z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
-    :root { --bg:#090d16; --panel:#111827; --panel-border:#1f2937; --accent:#10b981; --accent-hover:#059669; --text:#f3f4f6; --text-muted:#9ca3af; --danger:#ef4444; --warning:#f59e0b; }
+    :root {
+      --bg:#090d16; --panel:#111827; --panel-border:#1f2937; --accent:#10b981; --accent-hover:#059669;
+      --text:#f3f4f6; --text-muted:#9ca3af; --danger:#ef4444; --warning:#f59e0b;
+      --input-bg:#1f2937; --input-border:#374151;
+      --msg-err-bg:#7f1d1d; --msg-err-fg:#fca5a5; --msg-warn-bg:#78350f; --msg-warn-fg:#fde68a;
+    }
+    html[data-theme="light"] {
+      --bg:#f5f7fa; --panel:#ffffff; --panel-border:#e2e8f0; --accent:#10b981; --accent-hover:#059669;
+      --text:#0f172a; --text-muted:#64748b; --danger:#dc2626; --warning:#d97706;
+      --input-bg:#f1f5f9; --input-border:#cbd5e1;
+      --msg-err-bg:#fee2e2; --msg-err-fg:#991b1b; --msg-warn-bg:#fef3c7; --msg-warn-fg:#92400e;
+    }
     * { box-sizing:border-box; margin:0; padding:0; }
-    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
-    .card { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; padding:28px; width:100%; max-width:380px; }
+    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; position:relative; }
+    .card { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; padding:28px; width:100%; max-width:380px; position:relative; }
     .logo { width:44px; height:44px; background:linear-gradient(135deg,#10b981,#06b6d4); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:22px; margin-bottom:14px; }
     h1 { font-size:18px; margin-bottom:4px; }
     .sub { font-size:12px; color:var(--text-muted); margin-bottom:20px; }
     label { display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px; }
-    input { width:100%; background:#1f2937; border:1px solid #374151; border-radius:6px; padding:10px 12px; color:#fff; font-size:14px; outline:none; }
+    input { width:100%; background:var(--input-bg); border:1px solid var(--input-border); border-radius:6px; padding:10px 12px; color:var(--text); font-size:14px; outline:none; }
     input:focus { border-color:var(--accent); }
     .btn { width:100%; padding:11px; border:none; border-radius:6px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; margin-top:14px; }
     .btn:hover { background:var(--accent-hover); }
     .btn:disabled { opacity:0.6; cursor:not-allowed; }
-    .msg { font-size:12px; margin-top:12px; padding:8px 10px; border-radius:6px; display:none; }
-    .msg.error { display:block; background:#7f1d1d; color:#fca5a5; }
-    .msg.warn { display:block; background:#78350f; color:#fde68a; }
+    .msg { font-size:12px; margin-top:12px; padding:8px 10px; border-radius:6px; display:none; word-break:break-word; }
+    .msg.error { display:block; background:var(--msg-err-bg); color:var(--msg-err-fg); }
+    .msg.warn { display:block; background:var(--msg-warn-bg); color:var(--msg-warn-fg); }
     .hint { font-size:11px; color:var(--text-muted); margin-top:16px; line-height:1.5; }
+    .theme-toggle {
+      position:absolute; top:16px; right:16px;
+      background:var(--input-bg); border:1px solid var(--panel-border); color:var(--text);
+      border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+      cursor:pointer; font-size:15px; transition:all .15s;
+    }
+    .theme-toggle:hover { border-color:var(--accent); color:var(--accent); }
   </style>
 </head>
 <body>
   <div class="card">
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema">🌙</button>
     <div class="logo">🚀</div>
     <h1>WhatsPower-Ultra Campaign Studio</h1>
     <div class="sub">Nivel 3 · Consola de difusión, chat y anti-ban</div>
@@ -56,6 +76,25 @@ export function renderDashboardLoginHtml(): string {
     <div class="hint">El secreto se canjea <b>una vez</b> por una sesión HttpOnly de 1 hora; jamás se guarda en el navegador. Tras 10 intentos fallidos por minuto el acceso se bloquea temporalmente.</div>
   </div>
   <script>
+    function toggleTheme() {
+      var html = document.documentElement;
+      var actual = html.getAttribute('data-theme') || 'dark';
+      var nuevo = actual === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', nuevo);
+      try { localStorage.setItem('wp-theme', nuevo); } catch (e) {}
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.textContent = nuevo === 'dark' ? '🌙' : '☀️';
+    }
+    (function () {
+      try {
+        var guardado = localStorage.getItem('wp-theme');
+        if (guardado === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+          var btn = document.getElementById('themeToggle');
+          if (btn) btn.textContent = '☀️';
+        }
+      } catch (e) {}
+    })();
     var params = new URLSearchParams(location.search);
     if (params.get('expired') === '1') {
       var m = document.getElementById('msg');
@@ -97,10 +136,26 @@ export function renderDashboardAppHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WhatsPower-Ultra — Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2310b981'/%3E%3Cpath d='M16 6 L25 11 V21 L16 26 L7 21 V11 Z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
     :root {
       --bg:#090d16; --panel:#111827; --panel-border:#1f2937; --accent:#10b981; --accent-hover:#059669;
       --text:#f3f4f6; --text-muted:#9ca3af; --warning:#f59e0b; --danger:#ef4444; --info:#3b82f6;
+      --input-bg:#1f2937; --input-border:#374151; --hover-bg:#1a2436;
+      --table-head:#1e293b; --table-row-border:#1e293b; --table-row-alt:#334155;
+      --metric-bg:#1e293b; --metric-border:#334155;
+      --skeleton-from:#1e293b; --skeleton-to:#334155;
+      --shadow:0 6px 16px rgba(0,0,0,0.4);
+    }
+    /* Modo claro: se activa con data-theme="light" en <html> */
+    html[data-theme="light"] {
+      --bg:#f5f7fa; --panel:#ffffff; --panel-border:#e2e8f0; --accent:#10b981; --accent-hover:#059669;
+      --text:#0f172a; --text-muted:#64748b; --warning:#d97706; --danger:#dc2626; --info:#2563eb;
+      --input-bg:#f1f5f9; --input-border:#cbd5e1; --hover-bg:#f1f5f9;
+      --table-head:#f1f5f9; --table-row-border:#e2e8f0; --table-row-alt:#cbd5e1;
+      --metric-bg:#f8fafc; --metric-border:#e2e8f0;
+      --skeleton-from:#e2e8f0; --skeleton-to:#cbd5e1;
+      --shadow:0 6px 16px rgba(15,23,42,0.1);
     }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
@@ -113,8 +168,8 @@ export function renderDashboardAppHtml(): string {
     .brand-sub { font-size:10px; color:var(--text-muted); }
     .nav { flex:1; overflow-y:auto; padding:10px 8px; display:flex; flex-direction:column; gap:2px; }
     .nav-item { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:8px; font-size:13px; font-weight:600; color:var(--text-muted); cursor:pointer; border:1px solid transparent; background:transparent; text-align:left; width:100%; }
-    .nav-item:hover { background:#1a2436; color:#e5e7eb; }
-    .nav-item.active { background:#1f2937; color:#fff; border-color:var(--panel-border); }
+    .nav-item:hover { background:var(--hover-bg); color:var(--text); }
+    .nav-item.active { background:var(--panel-border); color:var(--text); border-color:var(--panel-border); }
     .nav-badge { margin-left:auto; background:#7f1d1d; color:#fca5a5; font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px; display:none; }
     .sidebar-footer { padding:12px; border-top:1px solid var(--panel-border); font-size:11px; color:var(--text-muted); }
     .transport-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--warning); margin-right:6px; }
@@ -125,7 +180,11 @@ export function renderDashboardAppHtml(): string {
     .main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
     .topbar { background:var(--panel); border-bottom:1px solid var(--panel-border); padding:12px 20px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
     .topbar h2 { font-size:16px; color:#fff; }
-    .hamburger { display:none; background:#1f2937; border:1px solid var(--panel-border); color:#fff; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:15px; }
+    /* Botón toggle de tema claro/oscuro */
+    .theme-toggle { background:var(--input-bg); border:1px solid var(--panel-border); color:var(--text); border-radius:8px; width:34px; height:34px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:16px; transition:all .15s; flex-shrink:0; }
+    .theme-toggle:hover { border-color:var(--accent); color:var(--accent); }
+    .topbar-actions { display:flex; align-items:center; gap:8px; }
+    .hamburger { display:none; background:var(--input-bg); border:1px solid var(--panel-border); color:var(--text); border-radius:6px; padding:6px 10px; cursor:pointer; font-size:15px; }
     .view-root { flex:1; overflow-y:auto; padding:20px; }
     .backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:35; }
 
@@ -134,35 +193,35 @@ export function renderDashboardAppHtml(): string {
     .card-title { font-size:14px; font-weight:700; color:#fff; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
     .form-group { margin-bottom:14px; }
     label { display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px; }
-    input, textarea, select { width:100%; background:#1f2937; border:1px solid #374151; border-radius:6px; padding:8px 12px; color:#fff; font-size:13px; outline:none; }
+    input, textarea, select { width:100%; background:var(--input-bg); border:1px solid var(--input-border); border-radius:6px; padding:8px 12px; color:#fff; font-size:13px; outline:none; }
     input:focus, textarea:focus, select:focus { border-color:var(--accent); }
     textarea { resize:vertical; font-family:inherit; }
     .btn { padding:8px 14px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; transition:all .2s; }
     .btn-accent { background:var(--accent); color:#fff; } .btn-accent:hover { background:var(--accent-hover); }
-    .btn-secondary { background:#374151; color:#fff; } .btn-secondary:hover { background:#4b5563; }
+    .btn-secondary { background:var(--input-border); color:var(--text); } .btn-secondary:hover { background:var(--table-row-alt); }
     .btn-danger { background:#991b1b; color:#fca5a5; }
     .btn-warning { background:#92400e; color:#fde68a; }
     .btn-ghost { background:transparent; border:1px solid var(--panel-border); color:var(--text-muted); }
     .btn-sm { font-size:11px; padding:4px 8px; }
     .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
-    .metric-card { background:#1e293b; border-radius:8px; padding:14px; border:1px solid #334155; }
+    .metric-card { background:var(--metric-bg); border-radius:8px; padding:14px; border:1px solid var(--metric-border); }
     .metric-num { font-size:22px; font-weight:800; color:#fff; margin-top:4px; }
     .metric-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600; }
-    .table-wrap { overflow-x:auto; border:1px solid #1e293b; border-radius:8px; }
+    .table-wrap { overflow-x:auto; border:1px solid var(--table-row-border); border-radius:8px; }
     table { width:100%; border-collapse:collapse; font-size:12px; }
-    th { text-align:left; padding:8px 10px; background:#1e293b; color:var(--text-muted); border-bottom:1px solid #334155; white-space:nowrap; }
-    td { padding:8px 10px; border-bottom:1px solid #1e293b; vertical-align:middle; }
+    th { text-align:left; padding:8px 10px; background:var(--table-head); color:var(--text-muted); border-bottom:1px solid var(--table-row-alt); white-space:nowrap; }
+    td { padding:8px 10px; border-bottom:1px solid var(--table-row-border); vertical-align:middle; }
     tr:last-child td { border-bottom:none; }
     .badge-status { padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; white-space:nowrap; }
     .badge-sent { background:#064e3b; color:#6ee7b7; }
     .badge-pending { background:#1e3a8a; color:#93c5fd; }
     .badge-skipped { background:#78350f; color:#fde68a; }
     .badge-failed { background:#7f1d1d; color:#fca5a5; }
-    .badge-neutral { background:#1f2937; color:#9ca3af; }
+    .badge-neutral { background:var(--panel-border); color:var(--text-muted); }
     .tag-chip { display:inline-block; font-size:10px; padding:2px 8px; border-radius:10px; margin:1px 2px; background:#1e3a8a; color:#93c5fd; }
     .state-box { padding:32px 16px; text-align:center; color:#64748b; font-size:13px; }
     .state-box .btn { margin-top:12px; }
-    .skeleton { height:14px; border-radius:4px; background:linear-gradient(90deg,#1e293b 25%,#334155 50%,#1e293b 75%); background-size:200% 100%; animation:sk 1.2s infinite; margin:8px 0; }
+    .skeleton { height:14px; border-radius:4px; background:linear-gradient(90deg,var(--skeleton-from) 25%,var(--skeleton-to) 50%,var(--skeleton-from) 75%); background-size:200% 100%; animation:sk 1.2s infinite; margin:8px 0; }
     @keyframes sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
     /* Toasts */
@@ -183,8 +242,8 @@ export function renderDashboardAppHtml(): string {
     /* Chat */
     .chat-layout { display:grid; grid-template-columns:300px 1fr; gap:14px; height:calc(100vh - 140px); min-height:420px; }
     .conv-list { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; overflow-y:auto; }
-    .conv-item { padding:12px 14px; border-bottom:1px solid #1e293b; cursor:pointer; }
-    .conv-item:hover { background:#1a2436; }
+    .conv-item { padding:12px 14px; border-bottom:1px solid var(--table-row-border); cursor:pointer; }
+    .conv-item:hover { background:var(--hover-bg); }
     .conv-item.active { background:#1f2937; border-left:3px solid var(--accent); }
     .conv-name { font-size:13px; font-weight:700; color:#fff; display:flex; justify-content:space-between; gap:6px; }
     .conv-last { font-size:11px; color:var(--text-muted); margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -200,7 +259,7 @@ export function renderDashboardAppHtml(): string {
     .composer textarea { flex:1; min-height:44px; max-height:120px; }
     .qr-menu { position:absolute; bottom:64px; left:12px; right:12px; background:var(--panel); border:1px solid var(--panel-border); border-radius:8px; max-height:220px; overflow-y:auto; display:none; z-index:10; }
     .qr-item { padding:9px 12px; cursor:pointer; font-size:12px; border-bottom:1px solid #1e293b; }
-    .qr-item:hover { background:#1a2436; }
+    .qr-item:hover { background:var(--hover-bg); }
 
     /* Kanban */
     .kanban { display:flex; gap:12px; overflow-x:auto; align-items:flex-start; padding-bottom:8px; min-height:420px; }
@@ -242,6 +301,23 @@ export function renderDashboardAppHtml(): string {
       .kanban { flex-direction:column; }
       .kcol { width:100%; min-width:0; }
     }
+    /* B8: Pantallas muy estrechas (<380px): una sola columna, tablas con scroll interno */
+    @media (max-width: 380px) {
+      .topbar { padding:8px 10px; }
+      .topbar h2 { font-size:14px; }
+      .view-root { padding:8px; }
+      .card { padding:12px; }
+      .metric-card { padding:10px; }
+      .metric-num { font-size:18px; }
+      .two-col { grid-template-columns:1fr; gap:8px; }
+      .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+      table { font-size:11px; }
+      th, td { padding:6px 8px; }
+      .btn { padding:6px 10px; font-size:12px; }
+      .theme-toggle { width:28px; height:28px; font-size:13px; }
+      .brand-title { font-size:12px; }
+      .brand-sub { font-size:9px; }
+    }
   </style>
 </head>
 <body>
@@ -266,7 +342,10 @@ export function renderDashboardAppHtml(): string {
         <button class="hamburger" onclick="toggleSidebar()">☰</button>
         <h2 id="viewTitle">Resumen</h2>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Cerrar sesión</button>
+      <div class="topbar-actions">
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema">🌙</button>
+        <button class="btn btn-ghost btn-sm" onclick="doLogout()">Cerrar sesión</button>
+      </div>
     </div>
     <div class="view-root" id="viewRoot">
       <div class="skeleton" style="width:40%"></div>
@@ -286,7 +365,12 @@ export function renderDashboardAppHtml(): string {
     var box = document.getElementById('toasts');
     var el = document.createElement('div');
     el.className = 'toast ' + (type || 'ok');
-    el.textContent = text;
+    // B1: word-break + recortar a ~200 caracteres con elipsis
+    var txt = String(text || '');
+    if (txt.length > 200) txt = txt.slice(0, 200) + '…';
+    el.textContent = txt;
+    el.style.wordBreak = 'break-word';
+    el.style.overflowWrap = 'anywhere';
     box.appendChild(el);
     setTimeout(function () { el.remove(); }, 4200);
   }
@@ -318,12 +402,43 @@ export function renderDashboardAppHtml(): string {
     document.getElementById('backdrop').classList.toggle('show');
   }
   function closeSidebar() {
+    // B9: la transición dura 200ms; si se captura antes, se fotografía a medias.
+    // Retrasamos la limpieza de clases 350ms para que el sidebar termine de cerrarse.
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('backdrop').classList.remove('show');
   }
   function doLogout() {
     fetch('/logout', { method: 'POST' }).then(function () { location.href = '/login'; });
   }
+
+  // === Toggle de tema claro/oscuro (un solo clic) ===
+  function toggleTheme() {
+    var html = document.documentElement;
+    var actual = html.getAttribute('data-theme') || 'dark';
+    var nuevo = actual === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', nuevo);
+    try { localStorage.setItem('wp-theme', nuevo); } catch (e) {}
+    actualizarIconoTheme(nuevo);
+  }
+  function actualizarIconoTheme(tema) {
+    var btn = document.getElementById('themeToggle');
+    if (btn) btn.textContent = tema === 'dark' ? '🌙' : '☀️';
+  }
+  // Restaurar tema guardado al cargar
+  (function () {
+    try {
+      var guardado = localStorage.getItem('wp-theme');
+      if (guardado === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch (e) {}
+    // El icono se actualiza tras el render del topbar
+    setTimeout(function () {
+      var tema = document.documentElement.getAttribute('data-theme') || 'dark';
+      actualizarIconoTheme(tema);
+    }, 50);
+  })();
+
   var viewTimers = [];
   function clearViewTimers() { viewTimers.forEach(function (t) { clearInterval(t); }); viewTimers = []; }
 
@@ -447,6 +562,24 @@ export function renderDashboardAppHtml(): string {
       root.appendChild(err);
     });
     refreshUnreadBadge();
+    // B6: Auto-refresco del resumen cada 15s (se limpia al salir de la vista)
+    if (window._summaryTimer) clearInterval(window._summaryTimer);
+    window._summaryTimer = setInterval(function () {
+      // Solo refrescar si seguimos en la vista de resumen
+      if (location.hash !== '#/summary' && location.hash !== '') {
+        clearInterval(window._summaryTimer);
+        window._summaryTimer = null;
+        return;
+      }
+      api('/api/dashboard/summary').then(function (r) {
+        var s = r.data;
+        var nums = document.querySelectorAll('.metric-num');
+        var vals = [s.campaignsActive, s.sentTotal, s.ctrPercent + '%', s.clicks, s.contactsTotal, s.suppressedTotal, s.conversationsTotal, s.unreadTotal];
+        nums.forEach(function (el, i) {
+          if (i < vals.length) el.textContent = String(vals[i]);
+        });
+      }).catch(function () {});
+    }, 15000);
   }
 
   // ============================================================
@@ -1870,6 +2003,7 @@ export function renderDashboardAppHtml(): string {
   function route() {
     clearViewTimers();
     if (window.pollInterval) { clearInterval(window.pollInterval); window.pollInterval = null; }
+    if (window._summaryTimer) { clearInterval(window._summaryTimer); window._summaryTimer = null; }
     renderNav();
     var view = currentView();
     (VIEWS[view] || viewSummary)();
