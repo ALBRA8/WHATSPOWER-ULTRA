@@ -195,10 +195,37 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       return
     }
 
-    // 1. Healthcheck
+    // 1. Healthcheck y Métricas Operativas (Capa 2B)
     if (req.method === 'GET' && url.pathname === '/api/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ status: 'ok', service: 'whatspower-ultra' }))
+      try {
+        db.prepare('SELECT 1').get()
+        const queuePending = (db.prepare("SELECT COUNT(*) as c FROM campaign_items WHERE status = 'PENDING'").get() as any)?.c ?? 0
+        const queueInFlight = (db.prepare("SELECT COUNT(*) as c FROM campaign_items WHERE status = 'DISPATCHING'").get() as any)?.c ?? 0
+        const totalSent = (db.prepare("SELECT COUNT(*) as c FROM campaign_items WHERE status = 'SENT'").get() as any)?.c ?? 0
+        const totalUncertain = (db.prepare("SELECT COUNT(*) as c FROM campaign_items WHERE status = 'UNCERTAIN_DISPATCH'").get() as any)?.c ?? 0
+        const totalFailed = (db.prepare("SELECT COUNT(*) as c FROM campaign_items WHERE status IN ('FAILED_FATAL', 'FAILED_RETRYABLE')").get() as any)?.c ?? 0
+        const mem = process.memoryUsage()
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          status: 'ok',
+          service: 'whatspower-ultra',
+          uptimeSeconds: Math.floor(process.uptime()),
+          timestamp: new Date().toISOString(),
+          database: { connected: true, driver: 'node:sqlite' },
+          metrics: {
+            queue: { pending: queuePending, inFlight: queueInFlight },
+            dispatches: { sent: totalSent, failed: totalFailed, uncertain: totalUncertain },
+          },
+          memory: {
+            rssMb: Math.round(mem.rss / 1024 / 1024),
+            heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+          }
+        }))
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ status: 'error', error: err.message }))
+      }
       return
     }
 

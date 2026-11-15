@@ -148,18 +148,6 @@ export class BroadcastEngine {
         idempotencyKey,
       }
 
-      // Si el contacto importado contiene origen de consentimiento, registrarlo
-      if (contact.consentOrigin && this.consentStore) {
-        this.consentStore.recordConsent({
-          organizationId: orgId,
-          contactPhone: phone,
-          whoAuthorized: contact.name || 'CSV_IMPORT',
-          channel: 'CSV_IMPORT',
-          textShown: `Consentimiento registrado vía importación CSV (origen: ${contact.consentOrigin})`,
-          source: contact.consentOrigin,
-        })
-      }
-
       // 1. Pre-filtrado de Supresión (Bajas) — POR ORGANIZACIÓN (tercera reparación 5.B)
       if (await this.suppressionStore.isSuppressed(phone, orgId)) {
         classified.push({ item: { ...baseItem, status: 'SUPPRESSED', errorReason: 'Opt-out / Lista de baja activa' } })
