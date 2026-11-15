@@ -6,6 +6,11 @@ export interface ParsedContact {
   phone: string
   name?: string
   variables?: Record<string, string>
+  consentOrigin?: string
+}
+
+export interface ParseCsvOptions {
+  requireConsentOrigin?: boolean
 }
 
 export interface ImportResult {
@@ -38,7 +43,7 @@ export function canonicalizePhone(raw: string | undefined | null): string | null
   return null
 }
 
-export function parseAudienceCsv(csvContent: string): ImportResult {
+export function parseAudienceCsv(csvContent: string, options?: ParseCsvOptions): ImportResult {
   const lines = csvContent
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -58,6 +63,22 @@ export function parseAudienceCsv(csvContent: string): ImportResult {
     throw new Error('El archivo CSV debe contener una columna obligatoria "phone" (o "telefono"/"celular")')
   }
 
+  const consentIdx = headers.findIndex(
+    (h) =>
+      h === 'consent_origin' ||
+      h === 'origen_consentimiento' ||
+      h === 'consent_source' ||
+      h === 'fuente_consentimiento' ||
+      h === 'consentimiento' ||
+      h === 'origen'
+  )
+
+  if (options?.requireConsentOrigin && consentIdx === -1) {
+    throw new Error(
+      'CSV_CONSENT_REQUIRED: El archivo CSV debe contener una columna obligatoria con el origen del consentimiento ("consent_origin" o "origen_consentimiento") conforme a la Ley 1581 de 2012'
+    )
+  }
+
   const nameIdx = headers.findIndex((h) => h === 'name' || h === 'nombre')
 
   const seenPhones = new Set<string>()
@@ -75,6 +96,12 @@ export function parseAudienceCsv(csvContent: string): ImportResult {
       continue
     }
 
+    const consentOrigin = consentIdx !== -1 && row[consentIdx] ? row[consentIdx] : undefined
+    if (options?.requireConsentOrigin && !consentOrigin) {
+      invalidCount++
+      continue
+    }
+
     if (seenPhones.has(canonical)) {
       duplicatesCount++
       continue
@@ -86,7 +113,7 @@ export function parseAudienceCsv(csvContent: string): ImportResult {
     const variables: Record<string, string> = {}
 
     headers.forEach((header, idx) => {
-      if (idx !== phoneIdx && idx !== nameIdx && row[idx]) {
+      if (idx !== phoneIdx && idx !== nameIdx && idx !== consentIdx && row[idx]) {
         variables[header] = row[idx]
       }
     })
@@ -95,6 +122,7 @@ export function parseAudienceCsv(csvContent: string): ImportResult {
       phone: canonical,
       name,
       variables: Object.keys(variables).length > 0 ? variables : undefined,
+      consentOrigin,
     })
   }
 

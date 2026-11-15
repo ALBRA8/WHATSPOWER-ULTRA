@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
@@ -7,6 +7,7 @@ import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual } from
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
+import { ConsentStore } from './safety/consent-store.ts'
 import { renderCampaignStudioHtml } from './studio/campaign-studio-html.ts'
 import { renderSpintax } from './engine/spintax.ts'
 import { parseAudienceCsv } from './audiences/csv-importer.ts'
@@ -68,17 +69,19 @@ export function createBroadcastServer(options?: {
       // (reparación integral) paridad de salvaguarda: el env explícito habilita el daemon
       : new HttpCrmDaemonDispatcher({ allowRealDispatch: process.env.ALLOW_REAL_DISPATCH === 'true' }))
   const lockChecker = options?.lockChecker || (whatsPowerEnabled ? new Http2ALockChecker({ enabled: true }) : new StandaloneLockChecker())
+  const consentStore = new ConsentStore(db)
   const suppressionStore =
     options?.suppressionStore ||
     (whatsPowerEnabled
-      ? new CompositeSuppressionChecker(new LocalSuppressionStore(db), new Http2ASuppressionChecker())
-      : new LocalSuppressionStore(db))
+      ? new CompositeSuppressionChecker(new LocalSuppressionStore(db, consentStore), new Http2ASuppressionChecker())
+      : new LocalSuppressionStore(db, consentStore))
 
   const engine = new BroadcastEngine({
     db,
     dispatcher,
     lockChecker,
     suppressionStore,
+    consentStore,
   })
 
   // Ejecutar recuperación ante caídas al arrancar
@@ -404,19 +407,31 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     if (req.method === 'GET' && url.pathname.startsWith('/t/')) {
       const code = url.pathname.replace('/t/', '')
       const contactPhone = url.searchParams.get('p') || null
-      const userAgent = req.headers['user-agent'] || null
-      const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1'
+      const userAgent = (req.headers['user-agent'] as string) || null
+
+      // Validación X-Forwarded-For SOLO si TRUST_PROXY está explícitamente habilitado
+      const trustProxy = process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1'
+      let clientIp = req.socket.remoteAddress || '127.0.0.1'
+      if (trustProxy && req.headers['x-forwarded-for']) {
+        const xff = req.headers['x-forwarded-for']
+        const first = (Array.isArray(xff) ? xff[0] : xff).split(',')[0].trim()
+        if (first) clientIp = first
+      }
+
+      // No guardar IP cruda: anonimización mediante SHA-256 (Ley 1581 / GDPR)
+      const salt = process.env.IP_HASH_SALT || 'crm_albra_privacy_salt'
+      const hashedIp = createHash('sha256').update(`${clientIp}:${salt}`).digest('hex').slice(0, 16)
 
       const row = db.prepare('SELECT target_url, campaign_id FROM tracked_links WHERE code = ?').get(code) as any
       if (row && row.target_url) {
         db.prepare('UPDATE tracked_links SET clicks = clicks + 1 WHERE code = ?').run(code)
         
-        // Registrar evento individual para heatmap y atribución
+        // Registrar evento individual para atribución con IP anonimizada (no cruda)
         try {
           db.prepare(`
             INSERT INTO tracked_link_clicks (id, code, contact_phone, user_agent, ip, clicked_at)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).run(`clk_${randomUUID()}`, code, contactPhone, userAgent, ip, Math.floor(Date.now() / 1000))
+          `).run(`clk_${randomUUID()}`, code, contactPhone, userAgent, hashedIp, Math.floor(Date.now() / 1000))
         } catch {}
 
         res.writeHead(302, { Location: row.target_url })
@@ -591,6 +606,83 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: e.message }))
         }
+      }
+      return
+    }
+
+    // 14. Cumplimiento y Protección de Datos Personales (Ley 1581 de 2012 / Habeas Data)
+    if (req.method === 'GET' && url.pathname === '/api/compliance/contact-data') {
+      const phone = url.searchParams.get('phone')
+      if (!phone) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'PHONE_REQUIRED' }))
+        return
+      }
+      const orgId = identity!.org ?? url.searchParams.get('org') ?? 'default'
+      const data = consentStore.exportContactData(orgId, phone)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(data))
+      return
+    }
+
+    if (req.method === 'DELETE' && url.pathname === '/api/compliance/contact-data') {
+      const phone = url.searchParams.get('phone')
+      if (!phone) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'PHONE_REQUIRED' }))
+        return
+      }
+      const orgId = identity!.org ?? url.searchParams.get('org') ?? 'default'
+      const result = consentStore.deleteContactData(orgId, phone, identity!.key)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(result))
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/compliance/consent') {
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      try {
+        const body = JSON.parse(rb.body)
+        const orgId = identity!.org ?? body.organizationId ?? 'default'
+        const rec = consentStore.recordConsent({
+          organizationId: orgId,
+          contactPhone: body.contactPhone,
+          whoAuthorized: body.whoAuthorized,
+          channel: body.channel,
+          textShown: body.textShown,
+          source: body.source,
+          authorizedAt: body.authorizedAt,
+        })
+        res.writeHead(201, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, consent: rec }))
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/compliance/opt-out') {
+      const rb = await readBody(req)
+      if (!rb.ok) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Payload demasiado grande' }))
+        return
+      }
+      try {
+        const body = JSON.parse(rb.body)
+        const orgId = identity!.org ?? body.organizationId ?? 'default'
+        await suppressionStore.addSuppression(orgId, body.contactPhone, body.reason || 'opt_out')
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, suppressed: true, consentRevoked: true }))
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
       }
       return
     }

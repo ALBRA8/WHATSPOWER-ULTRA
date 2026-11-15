@@ -10,6 +10,7 @@ import type {
 import { parseAudienceCsv } from '../audiences/csv-importer.ts'
 import { renderSpintax } from '../engine/spintax.ts'
 import { FatigueManager, LocalSuppressionStore } from '../safety/suppression.ts'
+import { ConsentStore } from '../safety/consent-store.ts'
 import { Throttler, type ThrottlerOptions } from './throttler.ts'
 import { isDispatchableStatus, transitionCampaignStatus, resumeCooldownExpiredCampaigns } from './campaign-lifecycle.ts'
 
@@ -60,6 +61,7 @@ export class BroadcastEngine {
   lockChecker: LockChecker
   suppressionStore: SuppressionChecker
   fatigueManager: FatigueManager
+  consentStore?: ConsentStore
   throttler: Throttler
   /** Identidad única de este worker — queda registrada en campaign_items.claimed_by. */
   readonly workerId: string
@@ -74,6 +76,7 @@ export class BroadcastEngine {
     dispatcher: Dispatcher
     lockChecker: LockChecker
     suppressionStore?: SuppressionChecker
+    consentStore?: ConsentStore
     throttlerOptions?: Partial<ThrottlerOptions>
     workerId?: string
     /** (hallazgo 9) activa el pacing durable por organización (default false
@@ -87,7 +90,8 @@ export class BroadcastEngine {
     this.db = options.db
     this.dispatcher = options.dispatcher
     this.lockChecker = options.lockChecker
-    this.suppressionStore = options.suppressionStore || new LocalSuppressionStore(this.db)
+    this.consentStore = options.consentStore
+    this.suppressionStore = options.suppressionStore || new LocalSuppressionStore(this.db, this.consentStore)
     this.fatigueManager = new FatigueManager(this.db)
     this.throttler = new Throttler(options.throttlerOptions)
     this.workerId = options.workerId || `wrk_${randomUUID()}`
@@ -142,6 +146,18 @@ export class BroadcastEngine {
         contactName: contact.name,
         variables: contact.variables,
         idempotencyKey,
+      }
+
+      // Si el contacto importado contiene origen de consentimiento, registrarlo
+      if (contact.consentOrigin && this.consentStore) {
+        this.consentStore.recordConsent({
+          organizationId: orgId,
+          contactPhone: phone,
+          whoAuthorized: contact.name || 'CSV_IMPORT',
+          channel: 'CSV_IMPORT',
+          textShown: `Consentimiento registrado vía importación CSV (origen: ${contact.consentOrigin})`,
+          source: contact.consentOrigin,
+        })
       }
 
       // 1. Pre-filtrado de Supresión (Bajas) — POR ORGANIZACIÓN (tercera reparación 5.B)
@@ -388,6 +404,18 @@ export class BroadcastEngine {
       if (Number(up.changes) !== 1) return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
       this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
       return { processed: true, status: 'SKIPPED_SUPPRESSION_UNAVAILABLE' }
+    }
+
+    // D1.5. FASE 2: Comprobación Just-In-Time de Consentimiento Vigente (Ley 1581)
+    if (this.consentStore && !this.consentStore.hasActiveConsent(campaign.organizationId, phone)) {
+      const up = this.db.prepare(`
+        UPDATE campaign_items
+        SET status = 'SKIPPED_NO_CONSENT', error_reason = 'Contacto sin consentimiento previo vigente (Ley 1581)'
+        WHERE id = ? AND status = 'DISPATCHING' AND claimed_by = ?
+      `).run(nextItem.id, this.workerId)
+      if (Number(up.changes) !== 1) return { processed: true, status: 'CLAIM_LOST', error: 'finalización tardía: el claim fue reconciliado por otro proceso (sin doble contabilización)' }
+      this.db.prepare('UPDATE campaigns SET skipped_count = skipped_count + 1 WHERE id = ?').run(campaignId)
+      return { processed: true, status: 'SKIPPED_NO_CONSENT' }
     }
 
     // D2. FASE 2: Comprobación Just-In-Time de Locks (< 50 ms antes del despacho)

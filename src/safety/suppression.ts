@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type { SuppressionChecker } from '../types.ts'
 import { resolveOrgServiceCredential } from '../org-credentials.ts'
+import type { ConsentStore } from './consent-store.ts'
 
 /**
  * POLÍTICA DE SUPRESIÓN (tercera reparación 5.B — decisión documentada):
@@ -30,9 +31,11 @@ export const LEGACY_MIGRATION_REASON = 'migrado_v4: opt-out previo al aislamient
 
 export class LocalSuppressionStore implements SuppressionChecker {
   db: DatabaseSync
+  consentStore?: ConsentStore
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, consentStore?: ConsentStore) {
     this.db = db
+    this.consentStore = consentStore
   }
 
   async isSuppressed(phone: string, organizationId: string): Promise<boolean> {
@@ -57,6 +60,14 @@ export class LocalSuppressionStore implements SuppressionChecker {
         reason = excluded.reason,
         created_at = excluded.created_at
     `).run(organizationId, phone, reason, Math.floor(Date.now() / 1000))
+
+    if (this.consentStore) {
+      try {
+        this.consentStore.revokeConsent(organizationId, phone, `Baja / Opt-out: ${reason}`, 'suppression_service')
+      } catch (err) {
+        console.warn('[LocalSuppressionStore] No se pudo revocar consentimiento al procesar baja:', err)
+      }
+    }
   }
 
   /** Alta en la lista GLOBAL restringida (solo requisitos legales documentados; auditable). */

@@ -6,3 +6,7 @@ node_modules
 *.db-shm
 db/
 .DS_Store
+*.pid
+capture/
+inbox/
+dist/

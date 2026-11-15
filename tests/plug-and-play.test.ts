@@ -17,9 +17,9 @@ describe('PLUG-AND-PLAY MODULARITY TESTS (ALBRA 3 Tiers)', () => {
     assert.ok(server, 'El servidor se inicia limpiamente')
     assert.ok(engine, 'El motor de broadcast está listo')
 
-    const csvContent = `phone,name
-573001112233,Carlos Standalone
-573009998877,Laura Directa`
+    const csvContent = `phone,name,consent_origin
+573001112233,Carlos Standalone,formulario_web
+573009998877,Laura Directa,formulario_web`
 
     // Crear campaña en modo standalone
     const campaign = await engine.createCampaign({
