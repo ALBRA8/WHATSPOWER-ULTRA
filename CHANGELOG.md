@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## 2026-11-16 — Mejora exponencial: theme toggle + sitio público + webhook doc
+
+### Añadido
+- **Toggle de tema claro/oscuro** en el dashboard (`src/studio/dashboard-html.ts`):
+  - Botón 🌙/☀️ en el topbar con un solo clic.
+  - Variables CSS para modo claro (`html[data-theme="light"]`) con paleta completa
+    (fondos, paneles, bordes, inputs, tablas, métricas, skeletons).
+  - Persistencia en `localStorage` (`wp-theme`); se restaura al recargar.
+  - Todos los colores hardcodeados del dashboard se reemplazaron por variables CSS
+    para que respondan a ambos temas.
+- **Sitio público de referencia** en `/sitio/` (`web/sitio/`):
+  - 5 páginas HTML estáticas: `index.html` (inicio), `planes.html`, `faq.html`,
+    `alianza-ia.html`, `demo.html`.
+  - CSS compartido (`site.css`) con la paleta del original (#009430, #f7a820,
+    cuerpo 21px, columna 1140/1024/767) y responsive en 3 breakpoints (1024, 768, 390).
+  - FAQ con patrón `role="tab"` + `aria-expanded` + `aria-controls`; signo "+"
+    dibujado con CSS `::after` (no texto) para evitar la trampa §9.1.
+  - Ruta `/sitio/` servida por `src/server.ts` con path-traversal protection.
+- **`docs/WEBHOOK-MENSAJES.md`**: contrato completo del webhook de entrada
+  (B10 del prompt). Cabeceras, firma HMAC v2 (ts + cuerpo + org), ventana de
+  tolerancia 5 min, ejemplos curl de alta y de error (401/503), idempotencia
+  de eventos duplicados, modelo de datos, reglas de seguridad.
+- **README** actualizado: documentación de las rutas `/sitio/`, el toggle de tema,
+  `npm run security:scan` y `npm run tsc`.
+
+### Cambiado
+- `src/studio/dashboard-html.ts`: colores hardcodeados (#1f2937, #374151, #1e293b,
+  #334155, #1a2436) reemplazados por variables CSS (--input-bg, --input-border,
+  --table-head, --table-row-border, --metric-bg, --hover-bg, etc.) para que
+  respondan al tema activo. Añadido botón `theme-toggle` en el topbar y
+  funciones `toggleTheme()` / `actualizarIconoTheme()`.
+- `src/server.ts`: import de `readFile`, `join`, `dirname`, `extname`, `normalize`,
+  `fileURLToPath`. Añadida ruta `/sitio/` para servir las páginas públicas.
+
+### Verificación
+- `npm run tsc`: limpio (0 errores).
+- `npm test`: 195/196 verdes (1 fail preexistente en `contracts-integration.test.ts:215`,
+  confirmado que falla igual sin estos cambios — es un test de red que requiere
+  el servicio 2A vivo en `:3003`).
+- `npm run security:scan`: limpio (0 secretos).
+- Rutas verificadas: `/` (200), `/login` (200), `/studio` (200), `/sitio/` (200),
+  `/sitio/index.html` (200), `/sitio/planes.html` (200), `/sitio/faq.html` (200),
+  `/sitio/site.css` (200), `/api/health` (200).
+
+---
+
 ## 2026-11-15 — Paridad de dashboard (encargo «PROMPT PARA EL CONSTRUCTOR», 5 fases)
 
 ### Añadido (todo ADITIVO sobre el motor de broadcast existente)

@@ -70,7 +70,13 @@ ALLOW_REAL_DISPATCH=false  # Salvaguarda física: false para simulación, true s
 npm start
 ```
 Abrir en el navegador:
-👉 **`http://localhost:3004/campaigns`**
+- 👉 **`http://localhost:3004/`** — Dashboard de paridad completo (login, resumen, chat, contactos, embudo, campañas, etiquetas, agentes, integraciones, ajustes). Requiere sesión.
+- 👉 **`http://localhost:3004/login`** — Pantalla de acceso.
+- 👉 **`http://localhost:3004/studio`** — Campaign Studio legado (intacto).
+- 👉 **`http://localhost:3004/sitio/`** — Sitio público de referencia (inicio, planes, FAQ, alianza IA, demo).
+
+### 3.b. Modo claro/oscuro
+El dashboard tiene un toggle de tema en el topbar (botón 🌙/☀️). Un clic cambia entre modo oscuro (por defecto) y modo claro. La preferencia se guarda en `localStorage` y se restaura al recargar.
 
 ### 4. Pruebas Automatizadas
 ```bash
@@ -88,3 +94,15 @@ Smoke contra servicios vivos (modo simulación, 0 envíos reales, limpieza propi
 ```bash
 node scripts/smoke-live.mjs
 ```
+
+### 5. Escaneo de secretos
+```bash
+npm run security:scan
+```
+Busca tokens, API keys, contraseñas y private keys en el código. Sale con código 1 si encuentra algo crítico.
+
+### 6. Compilación TypeScript
+```bash
+npm run tsc
+```
+Verifica tipos sin emitir ficheros. Debe salir sin errores.

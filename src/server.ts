@@ -1,5 +1,8 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { join, dirname, extname, normalize } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
@@ -217,6 +220,39 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     if (req.method === 'GET' && url.pathname === '/studio') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(renderCampaignStudioHtml())
+      return
+    }
+
+    // 0.b. Sitio público de referencia: /sitio/ sirve las 5 páginas estáticas
+    //      (inicio, planes, faq, alianza-ia, demo) desde web/sitio/.
+    if (req.method === 'GET' && (url.pathname === '/sitio' || url.pathname.startsWith('/sitio/'))) {
+      const __dirname = dirname(fileURLToPath(import.meta.url))
+      const SITIO_DIR = join(__dirname, '..', 'web', 'sitio')
+      const MIME: Record<string, string> = {
+        '.html': 'text/html; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.ico': 'image/x-icon',
+      }
+      let rutaRel = url.pathname.replace(/^\/sitio\/?/, '/')
+      if (rutaRel === '/' || rutaRel === '') rutaRel = '/index.html'
+      const rutaAbs = join(SITIO_DIR, rutaRel)
+      if (!rutaAbs.startsWith(SITIO_DIR)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' })
+        res.end('Forbidden')
+        return
+      }
+      try {
+        const contenido = await readFile(rutaAbs)
+        const mime = MIME[extname(rutaAbs).toLowerCase()] || 'application/octet-stream'
+        res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' })
+        res.end(contenido)
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain' })
+        res.end('Página no encontrada')
+      }
       return
     }
 
