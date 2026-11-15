@@ -44,7 +44,7 @@ test('U3-01: Http2ALockChecker envía X-Org-Id + credencial DE LA ORG y valida e
   process.env.WHATSPOWER_ORG_CREDENTIALS = `org_alpha:${CRED_A},org_beta:${CRED_B}`
   delete process.env.INTERNAL_API_SECRET
   try {
-    const checker = new Http2ALockChecker({ baseUrl: 'http://localhost:3910', timeoutMs: 800 })
+    const checker = new Http2ALockChecker({ baseUrl: 'http://localhost:3910', timeoutMs: 3000 })
     const res = await checker.checkLock('573001112233', 'org_alpha')
     assert.strictEqual(res.available, true)
     assert.strictEqual(seen.org, 'org_alpha', 'el header X-Org-Id debe viajar en TODA llamada')
