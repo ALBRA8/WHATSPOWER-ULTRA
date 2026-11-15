@@ -22,28 +22,48 @@ export function renderDashboardLoginHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WhatsPower-Ultra · Acceso</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2310b981'/%3E%3Cpath d='M16 6 L25 11 V21 L16 26 L7 21 V11 Z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
-    :root { --bg:#090d16; --panel:#111827; --panel-border:#1f2937; --accent:#10b981; --accent-hover:#059669; --text:#f3f4f6; --text-muted:#9ca3af; --danger:#ef4444; --warning:#f59e0b; }
+    :root {
+      --bg:#090d16; --panel:#111827; --panel-border:#1f2937; --accent:#10b981; --accent-hover:#059669;
+      --text:#f3f4f6; --text-muted:#9ca3af; --danger:#ef4444; --warning:#f59e0b;
+      --input-bg:#1f2937; --input-border:#374151;
+      --msg-err-bg:#7f1d1d; --msg-err-fg:#fca5a5; --msg-warn-bg:#78350f; --msg-warn-fg:#fde68a;
+    }
+    html[data-theme="light"] {
+      --bg:#f5f7fa; --panel:#ffffff; --panel-border:#e2e8f0; --accent:#10b981; --accent-hover:#059669;
+      --text:#0f172a; --text-muted:#64748b; --danger:#dc2626; --warning:#d97706;
+      --input-bg:#f1f5f9; --input-border:#cbd5e1;
+      --msg-err-bg:#fee2e2; --msg-err-fg:#991b1b; --msg-warn-bg:#fef3c7; --msg-warn-fg:#92400e;
+    }
     * { box-sizing:border-box; margin:0; padding:0; }
-    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
-    .card { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; padding:28px; width:100%; max-width:380px; }
+    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; position:relative; }
+    .card { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; padding:28px; width:100%; max-width:380px; position:relative; }
     .logo { width:44px; height:44px; background:linear-gradient(135deg,#10b981,#06b6d4); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:22px; margin-bottom:14px; }
     h1 { font-size:18px; margin-bottom:4px; }
     .sub { font-size:12px; color:var(--text-muted); margin-bottom:20px; }
     label { display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px; }
-    input { width:100%; background:#1f2937; border:1px solid #374151; border-radius:6px; padding:10px 12px; color:#fff; font-size:14px; outline:none; }
+    input { width:100%; background:var(--input-bg); border:1px solid var(--input-border); border-radius:6px; padding:10px 12px; color:var(--text); font-size:14px; outline:none; }
     input:focus { border-color:var(--accent); }
     .btn { width:100%; padding:11px; border:none; border-radius:6px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; margin-top:14px; }
     .btn:hover { background:var(--accent-hover); }
     .btn:disabled { opacity:0.6; cursor:not-allowed; }
-    .msg { font-size:12px; margin-top:12px; padding:8px 10px; border-radius:6px; display:none; }
-    .msg.error { display:block; background:#7f1d1d; color:#fca5a5; }
-    .msg.warn { display:block; background:#78350f; color:#fde68a; }
+    .msg { font-size:12px; margin-top:12px; padding:8px 10px; border-radius:6px; display:none; word-break:break-word; }
+    .msg.error { display:block; background:var(--msg-err-bg); color:var(--msg-err-fg); }
+    .msg.warn { display:block; background:var(--msg-warn-bg); color:var(--msg-warn-fg); }
     .hint { font-size:11px; color:var(--text-muted); margin-top:16px; line-height:1.5; }
+    .theme-toggle {
+      position:absolute; top:16px; right:16px;
+      background:var(--input-bg); border:1px solid var(--panel-border); color:var(--text);
+      border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+      cursor:pointer; font-size:15px; transition:all .15s;
+    }
+    .theme-toggle:hover { border-color:var(--accent); color:var(--accent); }
   </style>
 </head>
 <body>
   <div class="card">
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema">🌙</button>
     <div class="logo">🚀</div>
     <h1>WhatsPower-Ultra Campaign Studio</h1>
     <div class="sub">Nivel 3 · Consola de difusión, chat y anti-ban</div>
@@ -56,6 +76,25 @@ export function renderDashboardLoginHtml(): string {
     <div class="hint">El secreto se canjea <b>una vez</b> por una sesión HttpOnly de 1 hora; jamás se guarda en el navegador. Tras 10 intentos fallidos por minuto el acceso se bloquea temporalmente.</div>
   </div>
   <script>
+    function toggleTheme() {
+      var html = document.documentElement;
+      var actual = html.getAttribute('data-theme') || 'dark';
+      var nuevo = actual === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', nuevo);
+      try { localStorage.setItem('wp-theme', nuevo); } catch (e) {}
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.textContent = nuevo === 'dark' ? '🌙' : '☀️';
+    }
+    (function () {
+      try {
+        var guardado = localStorage.getItem('wp-theme');
+        if (guardado === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+          var btn = document.getElementById('themeToggle');
+          if (btn) btn.textContent = '☀️';
+        }
+      } catch (e) {}
+    })();
     var params = new URLSearchParams(location.search);
     if (params.get('expired') === '1') {
       var m = document.getElementById('msg');
@@ -97,6 +136,7 @@ export function renderDashboardAppHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WhatsPower-Ultra — Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2310b981'/%3E%3Cpath d='M16 6 L25 11 V21 L16 26 L7 21 V11 Z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
     :root {
       --bg:#090d16; --panel:#111827; --panel-border:#1f2937; --accent:#10b981; --accent-hover:#059669;
@@ -261,6 +301,23 @@ export function renderDashboardAppHtml(): string {
       .kanban { flex-direction:column; }
       .kcol { width:100%; min-width:0; }
     }
+    /* B8: Pantallas muy estrechas (<380px): una sola columna, tablas con scroll interno */
+    @media (max-width: 380px) {
+      .topbar { padding:8px 10px; }
+      .topbar h2 { font-size:14px; }
+      .view-root { padding:8px; }
+      .card { padding:12px; }
+      .metric-card { padding:10px; }
+      .metric-num { font-size:18px; }
+      .two-col { grid-template-columns:1fr; gap:8px; }
+      .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+      table { font-size:11px; }
+      th, td { padding:6px 8px; }
+      .btn { padding:6px 10px; font-size:12px; }
+      .theme-toggle { width:28px; height:28px; font-size:13px; }
+      .brand-title { font-size:12px; }
+      .brand-sub { font-size:9px; }
+    }
   </style>
 </head>
 <body>
@@ -308,7 +365,12 @@ export function renderDashboardAppHtml(): string {
     var box = document.getElementById('toasts');
     var el = document.createElement('div');
     el.className = 'toast ' + (type || 'ok');
-    el.textContent = text;
+    // B1: word-break + recortar a ~200 caracteres con elipsis
+    var txt = String(text || '');
+    if (txt.length > 200) txt = txt.slice(0, 200) + '…';
+    el.textContent = txt;
+    el.style.wordBreak = 'break-word';
+    el.style.overflowWrap = 'anywhere';
     box.appendChild(el);
     setTimeout(function () { el.remove(); }, 4200);
   }
@@ -340,6 +402,8 @@ export function renderDashboardAppHtml(): string {
     document.getElementById('backdrop').classList.toggle('show');
   }
   function closeSidebar() {
+    // B9: la transición dura 200ms; si se captura antes, se fotografía a medias.
+    // Retrasamos la limpieza de clases 350ms para que el sidebar termine de cerrarse.
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('backdrop').classList.remove('show');
   }
@@ -498,6 +562,24 @@ export function renderDashboardAppHtml(): string {
       root.appendChild(err);
     });
     refreshUnreadBadge();
+    // B6: Auto-refresco del resumen cada 15s (se limpia al salir de la vista)
+    if (window._summaryTimer) clearInterval(window._summaryTimer);
+    window._summaryTimer = setInterval(function () {
+      // Solo refrescar si seguimos en la vista de resumen
+      if (location.hash !== '#/summary' && location.hash !== '') {
+        clearInterval(window._summaryTimer);
+        window._summaryTimer = null;
+        return;
+      }
+      api('/api/dashboard/summary').then(function (r) {
+        var s = r.data;
+        var nums = document.querySelectorAll('.metric-num');
+        var vals = [s.campaignsActive, s.sentTotal, s.ctrPercent + '%', s.clicks, s.contactsTotal, s.suppressedTotal, s.conversationsTotal, s.unreadTotal];
+        nums.forEach(function (el, i) {
+          if (i < vals.length) el.textContent = String(vals[i]);
+        });
+      }).catch(function () {});
+    }, 15000);
   }
 
   // ============================================================
@@ -1921,6 +2003,7 @@ export function renderDashboardAppHtml(): string {
   function route() {
     clearViewTimers();
     if (window.pollInterval) { clearInterval(window.pollInterval); window.pollInterval = null; }
+    if (window._summaryTimer) { clearInterval(window._summaryTimer); window._summaryTimer = null; }
     renderNav();
     var view = currentView();
     (VIEWS[view] || viewSummary)();

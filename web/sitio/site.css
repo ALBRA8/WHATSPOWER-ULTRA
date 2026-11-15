@@ -290,3 +290,51 @@ img { max-width: 100%; height: auto; display: block; }
   .site-footer .container { grid-template-columns: 1fr; }
   .logos-grid { grid-template-columns: repeat(10, 1fr); }
 }
+
+/* ===================== Theme toggle (modo claro/oscuro) ===================== */
+:root {
+  --sitio-fondo: #ffffff;
+  --sitio-texto: #1a1a1a;
+  --sitio-panel: #f7f8f5;
+  --sitio-borde: #e4e6e0;
+  --sitio-texto-muted: #7a7a7a;
+}
+html[data-theme="dark"] {
+  --sitio-fondo: #0f1419;
+  --sitio-texto: #e6e6e6;
+  --sitio-panel: #1a1f26;
+  --sitio-borde: #2a2f36;
+  --sitio-texto-muted: #9aa0a8;
+}
+html[data-theme="dark"] body { background: var(--sitio-fondo); color: var(--sitio-texto); }
+html[data-theme="dark"] .site-header { background: var(--sitio-fondo); border-bottom-color: var(--sitio-borde); }
+html[data-theme="dark"] .banda { color: var(--sitio-texto); }
+html[data-theme="dark"] .banda.alt { background: var(--sitio-panel); }
+html[data-theme="dark"] .card { background: var(--sitio-panel); border-color: var(--sitio-borde); color: var(--sitio-texto); }
+html[data-theme="dark"] .card p { color: var(--sitio-texto-muted); }
+html[data-theme="dark"] .site-footer { background: #0a0e12; color: #8a9a8e; }
+html[data-theme="dark"] h1, html[data-theme="dark"] h2, html[data-theme="dark"] h3 { color: var(--sitio-texto); }
+html[data-theme="dark"] .hero p { color: var(--sitio-texto-muted); }
+html[data-theme="dark"] .plan { background: var(--sitio-panel); border-color: var(--sitio-borde); }
+html[data-theme="dark"] .faq-pregunta { color: var(--sitio-texto); }
+
+.theme-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 100;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--verde);
+  background: var(--sitio-fondo);
+  color: var(--verde);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: all .15s;
+}
+.theme-btn:hover { background: var(--verde); color: #fff; }
