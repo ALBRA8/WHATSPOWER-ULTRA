@@ -48,6 +48,11 @@ export function renderDashboardLoginHtml(): string {
     .btn { width:100%; padding:11px; border:none; border-radius:6px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; margin-top:14px; }
     .btn:hover { background:var(--accent-hover); }
     .btn:disabled { opacity:0.6; cursor:not-allowed; }
+    .btn-demo { width:100%; padding:10px; border:1px dashed var(--accent); border-radius:6px; background:transparent; color:var(--accent); font-size:13px; font-weight:600; cursor:pointer; margin-top:10px; transition:all .15s; }
+    .btn-demo:hover { background:var(--accent); color:#fff; }
+    .btn-demo:disabled { opacity:0.5; cursor:not-allowed; }
+    .demo-hint { font-size:11px; color:var(--text-muted); margin-top:10px; padding:8px 10px; background:var(--input-bg); border-radius:6px; line-height:1.5; display:none; }
+    .demo-hint.visible { display:block; }
     .msg { font-size:12px; margin-top:12px; padding:8px 10px; border-radius:6px; display:none; word-break:break-word; }
     .msg.error { display:block; background:var(--msg-err-bg); color:var(--msg-err-fg); }
     .msg.warn { display:block; background:var(--msg-warn-bg); color:var(--msg-warn-fg); }
@@ -72,8 +77,10 @@ export function renderDashboardLoginHtml(): string {
       <input type="password" id="secret" name="secret" autocomplete="current-password" placeholder="Clave ADMIN_API_KEYS de tu organización" required>
       <button class="btn" id="loginBtn" type="submit">Entrar</button>
     </form>
+    <button class="btn-demo" id="demoBtn" type="button" onclick="loginDemo()">🚀 Entrar sin registro (demo)</button>
     <div class="msg" id="msg"></div>
     <div class="hint">El secreto se canjea <b>una vez</b> por una sesión HttpOnly de 1 hora; jamás se guarda en el navegador. Tras 10 intentos fallidos por minuto el acceso se bloquea temporalmente.</div>
+    <div class="demo-hint" id="demoHint">El modo demo usa una sesión temporal con la primera organización configurada. Desactívalo en producción (<code>DEMO_MODE=false</code>).</div>
   </div>
   <script>
     function toggleTheme() {
@@ -95,6 +102,30 @@ export function renderDashboardLoginHtml(): string {
         }
       } catch (e) {}
     })();
+    // === Login demo (sin registro) ===
+    function loginDemo() {
+      var btn = document.getElementById('demoBtn');
+      var msg = document.getElementById('msg');
+      var hint = document.getElementById('demoHint');
+      btn.disabled = true;
+      msg.className = 'msg';
+      fetch('/studio/login-demo', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) {
+          if (r.ok) { location.href = '/'; return; }
+          return r.json().then(function (d) {
+            btn.disabled = false;
+            msg.className = 'msg error';
+            msg.textContent = (d && d.error) ? d.error : 'Modo demo no disponible';
+            if (hint) hint.classList.add('visible');
+          });
+        }).catch(function () {
+          btn.disabled = false;
+          msg.className = 'msg error';
+          msg.textContent = 'Error de red. Inténtalo de nuevo.';
+        });
+    }
+    // Mostrar la pista demo al cargar (informativo)
+    (function () { var h = document.getElementById('demoHint'); if (h) h.classList.add('visible'); })();
     var params = new URLSearchParams(location.search);
     if (params.get('expired') === '1') {
       var m = document.getElementById('msg');

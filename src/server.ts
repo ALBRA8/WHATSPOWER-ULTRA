@@ -312,6 +312,35 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       return
     }
 
+    // 0.a. Login DEMO (sin registro): solo cuando DEMO_MODE=true en .env.
+    // Emite una sesión con la PRIMERA identidad de ADMIN_API_KEYS.
+    // En producción: DEMO_MODE debe estar ausente o false — el endpoint devuelve 403.
+    if (req.method === 'POST' && url.pathname === '/studio/login-demo') {
+      const demoEnabled = String(process.env.DEMO_MODE || '').toLowerCase() === 'true'
+      if (!demoEnabled || adminKeys.length === 0) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Modo demo no habilitado. Configura DEMO_MODE=true en .env' }))
+        return
+      }
+      // Throttle anti-abuso del demo (mismo bucket que login normal)
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local'
+      const nowMs = Date.now()
+      const bucket = studioLoginAttempts.get(ip)
+      if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
+      else if (++bucket.count > 10) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Demasiados intentos. Inténtalo más tarde.' }))
+        return
+      }
+      studioLoginAttempts.delete(ip)
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': issueStudioSession(0, adminKeys[0].key),
+      })
+      res.end(JSON.stringify({ ok: true, sessionTtlSeconds: 3600, demo: true }))
+      return
+    }
+
     // 0. UI del DASHBOARD de paridad (Fase 3): login dedicado + app completa.
     // El studio legado queda intacto en /studio (mismo HTML y comportamiento de antes).
     if (req.method === 'GET' && url.pathname === '/login') {
