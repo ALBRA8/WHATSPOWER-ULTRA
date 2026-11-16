@@ -14,6 +14,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { canonicalizePhone } from '../audiences/csv-importer.ts'
 import {
+  STUDIO_SESSION_COOKIE,
+  STUDIO_SESSION_TTL_SECONDS,
   readBody,
   checkWebhookSecurity,
   resolveLeadSecrets,
@@ -106,6 +108,29 @@ export async function handleDashboardApi(
     json(res, 200, getSettings(ctx.db, org))
     return true
   }
+
+  // ---------- Sesión ----------
+  // La cookie de studio es stateless (orgIndex.iat.firma, TTL 1 h): la caducidad
+  // se puede mostrar en pantalla sin guardar nada más.
+  if (method === 'GET' && path === '/api/session') {
+    const raw = String(req.headers.cookie || '')
+      .split(';')
+      .map((c) => c.trim())
+      .find((c) => c.startsWith(`${STUDIO_SESSION_COOKIE}=`))
+    let issuedAt: number | null = null
+    if (raw) {
+      const iat = Number.parseInt(raw.slice(STUDIO_SESSION_COOKIE.length + 1).split('.')[1] || '', 10)
+      if (Number.isFinite(iat)) issuedAt = iat
+    }
+    json(res, 200, {
+      authenticated: true,
+      issuedAt,
+      expiresAt: issuedAt === null ? null : issuedAt + STUDIO_SESSION_TTL_SECONDS * 1000,
+      ttlSeconds: STUDIO_SESSION_TTL_SECONDS,
+      now: Date.now(),
+    })
+    return true
+  }
   if (method === 'PUT' && path === '/api/settings') {
     const rb = await readJsonObject(req)
     if (!rb.ok) return json(res, rb.status, { error: rb.error }), true
@@ -160,13 +185,31 @@ export async function handleDashboardApi(
     return true
   }
   if (method === 'GET' && path === '/api/contacts/export.csv') {
-    const { contacts } = listContacts(ctx.db, org, { limit: 200 })
+    // Exportación COMPLETA (antes se cortaba en 200 filas): recorre todas las
+    // páginas del mismo filtro que muestra la pantalla y escapa comas/comillas.
     const stages = listStages(ctx.db, org)
     const stageById = new Map(stages.map((s) => [s.id, s.name]))
+    const csvCell = (v: unknown): string => {
+      const s = v === null || v === undefined ? '' : String(v)
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
     const lines = ['phone,name,email,stage,source,created_at']
-    for (const c of contacts) {
-      const stageName = c.stage_id ? stageById.get(c.stage_id) || '' : ''
-      lines.push([c.phone, c.name || '', c.email || '', stageName, c.source, new Date(c.created_at * 1000).toISOString()].join(','))
+    const q = url.searchParams.get('q') || undefined
+    const tagId = url.searchParams.get('tagId') || undefined
+    const stageId = url.searchParams.get('stageId') || undefined
+    const pageSize = 200
+    const maxRows = 100000
+    let offset = 0
+    let total = Number.POSITIVE_INFINITY
+    while (offset < total && lines.length - 1 < maxRows) {
+      const page = listContacts(ctx.db, org, { q, tagId, stageId, limit: pageSize, offset })
+      total = page.total
+      if (page.contacts.length === 0) break
+      for (const c of page.contacts) {
+        const stageName = c.stage_id ? stageById.get(c.stage_id) || '' : ''
+        lines.push([c.phone, c.name || '', c.email || '', stageName, c.source, new Date(c.created_at * 1000).toISOString()].map(csvCell).join(','))
+      }
+      offset += page.contacts.length
     }
     res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="contacts.csv"' })
     res.end(lines.join('\n'))
@@ -408,7 +451,9 @@ export async function handleDashboardApi(
     if (m && method === 'GET') {
       const phone = decodeURIComponent(m[1])
       try {
-        const thread = getConversationThread(ctx.db, org, phone, { markRead: true })
+        const limit = parseInt(url.searchParams.get('limit') || '50', 10)
+        const before = url.searchParams.get('before') || undefined
+        const thread = getConversationThread(ctx.db, org, phone, { markRead: true, limit, before })
         if (!thread.conversation) return json(res, 404, { error: 'Conversación no encontrada' }), true
         json(res, 200, thread)
       } catch (e: any) {

@@ -78,54 +78,48 @@ function findStaticFile (bases: string[], rel: string): string | null {
  * Prioriza public/ (build) y recurre a web/ (fuentes) para servir sin construir.
  */
 function serveStaticWeb (pathname: string, res: ServerResponse, headOnly: boolean): boolean {
-  let bases: string[]
-  let rel: string
-  // (panel único 2026-11-16) No se sirve ningún panel estático: /app/… llega
-  // redirigido a `/` antes de esta función. Solo quedan el sitio y el icono.
+  // (dashboard único 2026-11-16) Páginas de venta retiradas: el servidor solo sirve el panel.
+  // Solo se conserva el favicon.ico para la pestaña del navegador.
   if (pathname === '/favicon.ico') {
-    // El icono del sitio vive con las páginas: build/ si está construido, web/site si no.
-    bases = siteBases()
-    rel = 'favicon.ico'
-  } else if (pathname.startsWith('/sitio/')) {
-    bases = siteBases()
-    rel = pathname.slice('/sitio/'.length)
-  } else {
-    return false
-  }
-
-  const file = findStaticFile(bases, rel)
-  if (!file) {
-    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end('<!DOCTYPE html><meta charset="utf-8"><title>No encontrado</title>' +
-      '<p style="font-family:system-ui;padding:40px">Página no encontrada. ' +
-      '<a href="/sitio/">Ir al inicio</a> · <a href="/">Ir al panel</a></p>')
+    const bases = siteBases()
+    const file = findStaticFile(bases, 'favicon.ico')
+    if (file) {
+      let body: Buffer
+      try {
+        body = readFileSync(file)
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('No se pudo leer el fichero')
+        return true
+      }
+      res.writeHead(200, {
+        'Content-Type': 'image/x-icon',
+        'Content-Length': String(body.length),
+        'Cache-Control': 'public, max-age=86400',
+        'X-Content-Type-Options': 'nosniff',
+      })
+      res.end(headOnly ? undefined : body)
+      return true
+    }
+    const ico = Buffer.from([0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x10, 0x10, 0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x68, 0x04, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00])
+    res.writeHead(200, {
+      'Content-Type': 'image/x-icon',
+      'Content-Length': String(ico.length),
+      'Cache-Control': 'public, max-age=86400',
+    })
+    res.end(headOnly ? undefined : ico)
     return true
   }
-
-  let body: Buffer
-  try {
-    body = readFileSync(file)
-  } catch {
-    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
-    res.end('No se pudo leer el fichero')
-    return true
-  }
-  const type = STATIC_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream'
-  res.writeHead(200, {
-    'Content-Type': type,
-    'Content-Length': String(body.length),
-    'Cache-Control': type.startsWith('text/html') ? 'no-cache' : 'public, max-age=300',
-    'X-Content-Type-Options': 'nosniff',
-  })
-  res.end(headOnly ? undefined : body)
-  return true
+  return false
 }
 
 const STATIC_REDIRECTS: Record<string, string> = {
-  '/app': '/', // (panel único) el segundo panel ya no se sirve: /app/ lleva al panel
-  '/sitio': '/sitio/',
-  '/inicio': '/sitio/',
-  '/panel': '/', // (panel único) enlace antiguo al panel: hoy es la portada
+  '/app': '/',
+  '/app/': '/',
+  '/sitio': '/',
+  '/sitio/': '/',
+  '/inicio': '/',
+  '/panel': '/',
 }
 
 // ============================================================
@@ -229,10 +223,9 @@ export function createBroadcastServer(options?: {
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-    // 0-bis. Página estática del sitio (/sitio/) y enlaces antiguos del panel.
-    // Son solo documentos: no exponen datos ni saltan la autenticación de /api/*.
+    // 0-bis. Redirección total al panel único en / (las páginas de venta se retiraron).
     if (req.method === 'GET' || req.method === 'HEAD') {
-      const redirectTo = STATIC_REDIRECTS[url.pathname] ?? (url.pathname === '/app/' || url.pathname.startsWith('/app/') ? '/' : undefined)
+      const redirectTo = STATIC_REDIRECTS[url.pathname] ?? (url.pathname.startsWith('/app/') || url.pathname.startsWith('/sitio/') ? '/' : undefined)
       if (redirectTo) {
         res.writeHead(302, { Location: redirectTo })
         res.end()

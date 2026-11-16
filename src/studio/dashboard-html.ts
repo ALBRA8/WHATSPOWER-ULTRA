@@ -248,6 +248,12 @@ export function renderDashboardAppHtml(): string {
     .conv-name { font-size:13px; font-weight:700; color:#fff; display:flex; justify-content:space-between; gap:6px; }
     .conv-last { font-size:11px; color:var(--text-muted); margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .conv-unread { background:var(--accent); color:#04211a; font-size:10px; font-weight:800; border-radius:10px; padding:1px 7px; }
+  .conv-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .conv-filtro { display:flex; gap:6px; align-items:center; }
+  .conv-filtro .btn[aria-pressed="true"] { box-shadow: inset 0 0 0 2px rgba(0,0,0,.25); }
+  .conv-mark { margin-left:6px; border:0; border-radius:10px; cursor:pointer; font-size:11px; font-weight:800;
+    line-height:1; padding:3px 5px; background:var(--accent); color:#04211a; }
+  .conv-mark:hover { filter:brightness(1.1); }
     .chat-thread { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; display:flex; flex-direction:column; overflow:hidden; }
     .thread-head { padding:12px 16px; border-bottom:1px solid var(--panel-border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
     .thread-msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; background:#0b1120; }
@@ -286,6 +292,18 @@ export function renderDashboardAppHtml(): string {
     .onb-step { flex:1; height:4px; border-radius:2px; background:#1f2937; }
     .onb-step.done { background:var(--accent); }
 
+    /* F11: accesibilidad (foco visible, enlace de salto) y movil 390px */
+    :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .skip-link { position:absolute; left:-9999px; top:0; z-index:200; background:var(--accent); color:#04211a; font-weight:700; padding:10px 14px; border-radius:0 0 8px 0; }
+    .skip-link:focus { left:0; }
+    .thread-more { display:flex; justify-content:center; padding:8px; border-bottom:1px solid var(--panel-border); }
+    .bubble.failed { border:1px solid #f87171; }
+    .thread-msgs .state-box { align-self:center; }
+    @media (max-width: 700px) {
+      .btn, .btn-sm, .nav-item, .theme-toggle, .hamburger, .conv-item { min-height:44px; }
+      .table-wrap { max-width:100%; -webkit-overflow-scrolling:touch; }
+    }
+
     @media (max-width: 900px) {
       .two-col { grid-template-columns:1fr; }
       .chat-layout { grid-template-columns:1fr; height:auto; }
@@ -321,6 +339,7 @@ export function renderDashboardAppHtml(): string {
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#viewRoot">Saltar al contenido</a>
   <div class="backdrop" id="backdrop" onclick="closeSidebar()"></div>
   <aside class="sidebar" id="sidebar">
     <div class="brand">
@@ -347,7 +366,7 @@ export function renderDashboardAppHtml(): string {
         <button class="btn btn-ghost btn-sm" onclick="doLogout()">Cerrar sesión</button>
       </div>
     </div>
-    <div class="view-root" id="viewRoot">
+    <div class="view-root" id="viewRoot" role="main" tabindex="-1">
       <div class="skeleton" style="width:40%"></div>
       <div class="skeleton" style="width:70%"></div>
       <div class="skeleton" style="width:55%"></div>
@@ -505,6 +524,8 @@ export function renderDashboardAppHtml(): string {
       var total = (r.data.total || 0);
       badge.style.display = total > 0 ? 'inline-block' : 'none';
       badge.textContent = String(total);
+      var enBoton = document.getElementById('convUnreadCount');
+      if (enBoton) enBoton.textContent = total > 0 ? total : '';
     }).catch(function () {});
   }
 
@@ -586,6 +607,7 @@ export function renderDashboardAppHtml(): string {
   // VISTA: Conversaciones / Chat
   // ============================================================
   var activeConversation = null;
+  var convFilter = 'all';
   function viewConversations() {
     setTitle('Conversaciones');
     var root = document.getElementById('viewRoot');
@@ -597,10 +619,41 @@ export function renderDashboardAppHtml(): string {
       '<div class="chat-thread" id="chatThread"><div class="state-box">Selecciona una conversación para ver el hilo.</div></div>';
     root.appendChild(layout);
     var q = document.createElement('div');
-    q.style.marginBottom = '10px';
-    q.innerHTML = '<input id="convSearch" placeholder="Buscar por teléfono o nombre…" style="max-width:300px;">';
+    q.className = 'conv-toolbar';
+    var buscador = document.createElement('input');
+    buscador.id = 'convSearch';
+    buscador.placeholder = 'Buscar por teléfono o nombre…';
+    buscador.style.maxWidth = '260px';
+    q.appendChild(buscador);
+    var grupo = document.createElement('div');
+    grupo.className = 'conv-filtro';
+    grupo.setAttribute('role', 'group');
+    grupo.setAttribute('aria-label', 'Filtrar conversaciones por lectura');
+    var bTodas = document.createElement('button');
+    bTodas.type = 'button'; bTodas.id = 'convFilterAll'; bTodas.className = 'btn btn-sm btn-accent';
+    bTodas.setAttribute('aria-pressed', 'true'); bTodas.textContent = 'Todas';
+    var bNoLeidas = document.createElement('button');
+    bNoLeidas.type = 'button'; bNoLeidas.id = 'convFilterUnread'; bNoLeidas.className = 'btn btn-sm btn-secondary';
+    bNoLeidas.setAttribute('aria-pressed', 'false'); bNoLeidas.textContent = 'No leídas ';
+    var contadorNoLeidas = document.createElement('span');
+    contadorNoLeidas.id = 'convUnreadCount';
+    bNoLeidas.appendChild(contadorNoLeidas);
+    grupo.appendChild(bTodas); grupo.appendChild(bNoLeidas);
+    q.appendChild(grupo);
     root.insertBefore(q, layout);
-    document.getElementById('convSearch').addEventListener('input', loadConversationList);
+    buscador.addEventListener('input', loadConversationList);
+    // F2: filtro leído / no leído. El filtro lo aplica el servidor (unreadOnly=1),
+    // no el navegador, y el botón activo lo anuncia con aria-pressed.
+    function setConvFilter(valor) {
+      convFilter = valor === 'unread' ? 'unread' : 'all';
+      bTodas.setAttribute('aria-pressed', convFilter === 'all' ? 'true' : 'false');
+      bTodas.className = 'btn btn-sm ' + (convFilter === 'all' ? 'btn-accent' : 'btn-secondary');
+      bNoLeidas.setAttribute('aria-pressed', convFilter === 'unread' ? 'true' : 'false');
+      bNoLeidas.className = 'btn btn-sm ' + (convFilter === 'unread' ? 'btn-accent' : 'btn-secondary');
+      loadConversationList();
+    }
+    bTodas.addEventListener('click', function () { setConvFilter('all'); });
+    bNoLeidas.addEventListener('click', function () { setConvFilter('unread'); });
     loadConversationList();
     refreshUnreadBadge();
     viewTimers.push(setInterval(function () { loadConversationList(); pollActiveThread(); refreshUnreadBadge(); }, 4000));
@@ -610,13 +663,18 @@ export function renderDashboardAppHtml(): string {
     var listEl = document.getElementById('convList');
     if (!listEl) return;
     var qv = (document.getElementById('convSearch') || {}).value || '';
-    api('/api/conversations?q=' + encodeURIComponent(qv)).then(function (r) {
+    var url = '/api/conversations?q=' + encodeURIComponent(qv) + (convFilter === 'unread' ? '&unreadOnly=1' : '');
+    api(url).then(function (r) {
       var convs = r.data.conversations || [];
       listEl.textContent = '';
       if (convs.length === 0) {
         var empty = document.createElement('div'); empty.className = 'state-box';
-        empty.textContent = 'Sin conversaciones todavía. Llegan al recibir un mensaje entrante (webhook) o al escribir desde contactos.';
+        empty.textContent = convFilter === 'unread'
+          ? 'No hay conversaciones sin leer: al abrir un hilo sus mensajes quedan leídos.'
+          : 'Sin conversaciones todavía. Llegan al recibir un mensaje entrante (webhook) o al escribir desde contactos.';
         listEl.appendChild(empty);
+        var totalEl = document.getElementById('convUnreadCount');
+        if (totalEl && convFilter === 'unread') totalEl.textContent = '0';
         return;
       }
       convs.forEach(function (c) {
@@ -625,7 +683,21 @@ export function renderDashboardAppHtml(): string {
         var name = document.createElement('div'); name.className = 'conv-name';
         var nm = document.createElement('span'); nm.textContent = c.contact_name || ('+' + c.contact_phone);
         name.appendChild(nm);
-        if (c.unread > 0) { var u = document.createElement('span'); u.className = 'conv-unread'; u.textContent = String(c.unread); name.appendChild(u); }
+        if (c.unread > 0) {
+          var u = document.createElement('span'); u.className = 'conv-unread'; u.textContent = String(c.unread); name.appendChild(u);
+          // F2: marcar leída sin abrir el hilo (deja el contador a cero en el sitio).
+          var markRead = document.createElement('button');
+          markRead.type = 'button'; markRead.className = 'conv-mark'; markRead.title = 'Marcar como leída';
+          markRead.setAttribute('aria-label', 'Marcar como leída');
+          markRead.textContent = '✓';
+          markRead.addEventListener('click', function (ev) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            api('/api/conversations/' + encodeURIComponent(c.contact_phone) + '/read', { method: 'POST' })
+              .then(function () { loadConversationList(); refreshUnreadBadge(); })
+              .catch(function (e) { if (String(e.message) !== 'SESSION_EXPIRED') toast('No se pudo marcar como leída', 'err'); });
+          });
+          name.appendChild(markRead);
+        }
         var last = document.createElement('div'); last.className = 'conv-last';
         last.textContent = (c.last_direction === 'outbound' ? '➤ ' : '⬅ ') + (c.last_message_text || '');
         item.appendChild(name); item.appendChild(last);
@@ -662,7 +734,7 @@ export function renderDashboardAppHtml(): string {
   function openConversation(phone, silent) {
     activeConversation = phone;
     document.querySelectorAll('.conv-item').forEach(function (el) { el.classList.remove('active'); });
-    api('/api/conversations/' + encodeURIComponent(phone)).then(function (r) {
+    api('/api/conversations/' + encodeURIComponent(phone) + '?limit=50').then(function (r) {
       var threadEl = document.getElementById('chatThread');
       if (!threadEl) return;
       threadEl.textContent = '';
@@ -688,8 +760,52 @@ export function renderDashboardAppHtml(): string {
       right.appendChild(agentSel);
       head.appendChild(title); head.appendChild(right);
       var msgs = document.createElement('div'); msgs.className = 'thread-msgs'; msgs.id = 'threadMsgs';
+      // F4: el hilo se pagina de 50 en 50; este boton pide los anteriores.
+      var olderBar = document.createElement('div'); olderBar.className = 'thread-more'; olderBar.id = 'threadMore';
+      var olderState = { oldest: r.data.oldestMessageId || null, hasMore: !!r.data.hasMore, loading: false };
+      function drawOlder() {
+        olderBar.textContent = '';
+        if (!olderState.hasMore || !olderState.oldest) { olderBar.style.display = 'none'; return; }
+        olderBar.style.display = 'flex';
+        var bOlder = document.createElement('button');
+        bOlder.className = 'btn btn-ghost btn-sm';
+        bOlder.id = 'threadOlder';
+        bOlder.textContent = 'Cargar mensajes anteriores';
+        bOlder.setAttribute('aria-label', 'Cargar mensajes anteriores de esta conversacion');
+        bOlder.addEventListener('click', function () {
+          if (olderState.loading) return;
+          olderState.loading = true;
+          bOlder.disabled = true;
+          bOlder.textContent = 'Cargando…';
+          api('/api/conversations/' + encodeURIComponent(phone) + '?limit=50&before=' + encodeURIComponent(olderState.oldest))
+            .then(function (older) {
+              var tmp = document.createElement('div');
+              renderThreadMessages(tmp, older.data.messages || []);
+              var emptyBox = msgs.querySelector('.state-box');
+              if (emptyBox) emptyBox.remove();
+              var first = msgs.firstChild;
+              while (tmp.firstChild) msgs.insertBefore(tmp.firstChild, first);
+              olderState.oldest = older.data.oldestMessageId || null;
+              olderState.hasMore = !!older.data.hasMore;
+              olderState.loading = false;
+              msgs.setAttribute('data-count', String(msgs.querySelectorAll('.bubble').length));
+              drawOlder();
+              toast('Mensajes anteriores cargados');
+            })
+            .catch(function (e) {
+              olderState.loading = false;
+              if (String(e.message) !== 'SESSION_EXPIRED') {
+                bOlder.disabled = false;
+                bOlder.textContent = 'Cargar mensajes anteriores';
+                toast('No se pudieron cargar los mensajes anteriores', 'err');
+              }
+            });
+        });
+        olderBar.appendChild(bOlder);
+      }
       renderThreadMessages(msgs, r.data.messages || []);
       msgs.setAttribute('data-count', String((r.data.messages || []).length));
+      drawOlder();
       var qrMenu = document.createElement('div'); qrMenu.className = 'qr-menu'; qrMenu.id = 'qrMenu';
       var composer = document.createElement('div'); composer.className = 'composer';
       var ta = document.createElement('textarea'); ta.id = 'composerText'; ta.placeholder = 'Escribe un mensaje… (/ para respuestas rápidas)';
@@ -719,7 +835,7 @@ export function renderDashboardAppHtml(): string {
         } else { menu.style.display = 'none'; }
       });
       composer.appendChild(qrMenu); composer.appendChild(ta); composer.appendChild(sendBtn);
-      threadEl.appendChild(head); threadEl.appendChild(msgs); threadEl.appendChild(composer);
+      threadEl.appendChild(head); threadEl.appendChild(olderBar); threadEl.appendChild(msgs); threadEl.appendChild(composer);
       msgs.scrollTop = msgs.scrollHeight;
       loadConversationList();
     }).catch(function (e) {
@@ -742,8 +858,16 @@ export function renderDashboardAppHtml(): string {
       body.textContent = m.text;
       b.appendChild(body);
       var meta = document.createElement('span'); meta.className = 'meta';
-      var statusText = m.direction === 'outbound' ? (m.status === 'SENT' ? ' ✓' : ' ✗') : '';
+      // F5: un fallo de entrega muestra el error REAL del transporte en el title.
+      var fallo = m.direction === 'outbound' && m.status !== 'SENT';
+      var statusText = m.direction === 'outbound' ? (fallo ? ' ✗' : ' ✓') : '';
       meta.textContent = new Date(m.createdAt * 1000).toLocaleTimeString('es') + statusText + (m.source === 'campaign' ? ' · campaña' : '');
+      if (fallo) {
+        var motivo = m.error ? String(m.error) : 'fallo de entrega (sin detalle del transporte)';
+        b.classList.add('failed');
+        b.title = 'Error de entrega: ' + motivo;
+        meta.title = b.title;
+      }
       b.appendChild(meta);
       container.appendChild(b);
     });
@@ -794,7 +918,13 @@ export function renderDashboardAppHtml(): string {
     var bImport = document.createElement('button'); bImport.className = 'btn btn-secondary btn-sm'; bImport.textContent = '📥 Importar CSV';
     bImport.addEventListener('click', openImportModal);
     var bExport = document.createElement('button'); bExport.className = 'btn btn-secondary btn-sm'; bExport.textContent = '📤 Exportar CSV';
-    bExport.addEventListener('click', function () { window.location.href = '/api/contacts/export.csv'; });
+    bExport.addEventListener('click', function () {
+      // F6: el CSV lleva los mismos filtros que la pantalla y sale COMPLETO.
+      var qv = (document.getElementById('ctSearch') || {}).value || '';
+      var tg = (document.getElementById('ctTagFilter') || {}).value || '';
+      var sg = (document.getElementById('ctStageFilter') || {}).value || '';
+      window.location.href = '/api/contacts/export.csv?q=' + encodeURIComponent(qv) + '&tagId=' + encodeURIComponent(tg) + '&stageId=' + encodeURIComponent(sg);
+    });
     var bNew = document.createElement('button'); bNew.className = 'btn btn-accent btn-sm'; bNew.textContent = '＋ Nuevo contacto';
     bNew.addEventListener('click', function () { openContactModal(null); });
     toolbar.appendChild(bImport); toolbar.appendChild(bExport); toolbar.appendChild(bNew);
@@ -865,6 +995,10 @@ export function renderDashboardAppHtml(): string {
             bE.addEventListener('click', function () { openContactModal(c); });
             var bT = document.createElement('button'); bT.className = 'btn btn-secondary btn-sm'; bT.style.marginLeft = '4px'; bT.textContent = '🏷️';
             bT.addEventListener('click', function () { openTagsModal(c); });
+            var bC = document.createElement('button'); bC.className = 'btn btn-secondary btn-sm'; bC.style.marginLeft = '4px'; bC.textContent = '🛡️';
+            bC.title = 'Registrar consentimiento';
+            bC.setAttribute('aria-label', 'Registrar consentimiento de ' + c.phone);
+            bC.addEventListener('click', function () { openConsentModal(c); });
             var bD = document.createElement('button'); bD.className = 'btn btn-danger btn-sm'; bD.style.marginLeft = '4px'; bD.textContent = '🗑';
             bD.addEventListener('click', function () {
               openModal('<h3>¿Borrar contacto?</h3><p style="font-size:12px;color:var(--text-muted)">Se eliminarán también su conversación y sus mensajes. Esta acción no se puede deshacer.</p>' +
@@ -876,7 +1010,7 @@ export function renderDashboardAppHtml(): string {
                 }).catch(function (e) { if (String(e.message) !== 'SESSION_EXPIRED') toast('No se pudo borrar', 'err'); });
               });
             });
-            tdA.appendChild(bE); tdA.appendChild(bT); tdA.appendChild(bD);
+            tdA.appendChild(bE); tdA.appendChild(bT); tdA.appendChild(bC); tdA.appendChild(bD);
             tr.appendChild(tdP); tr.appendChild(tdN); tr.appendChild(tdS); tr.appendChild(tdT); tr.appendChild(tdO); tr.appendChild(tdC); tr.appendChild(tdA);
             tbody.appendChild(tr);
           });
@@ -895,6 +1029,26 @@ export function renderDashboardAppHtml(): string {
           next.disabled = st.offset + st.limit >= total;
           next.addEventListener('click', function () { st.offset = st.offset + st.limit; load(); });
           pag.appendChild(prev); pag.appendChild(next);
+          // F6: salto directo a una pagina concreta.
+          var pages = Math.max(1, Math.ceil(total / st.limit));
+          var jump = document.createElement('input');
+          jump.id = 'ctJump'; jump.type = 'number'; jump.min = '1'; jump.max = String(pages); jump.value = String(Math.floor(st.offset / st.limit) + 1);
+          jump.setAttribute('aria-label', 'Numero de pagina');
+          jump.style.cssText = 'width:64px; padding:4px 6px;';
+          var jumpBtn = document.createElement('button');
+          jumpBtn.className = 'btn btn-ghost btn-sm'; jumpBtn.id = 'ctJumpGo'; jumpBtn.textContent = 'Ir';
+          jumpBtn.setAttribute('aria-label', 'Ir a la pagina indicada');
+          function goToPage() {
+            var p = parseInt(jump.value || '1', 10);
+            if (!isFinite(p)) p = 1;
+            p = Math.min(pages, Math.max(1, p));
+            st.offset = (p - 1) * st.limit;
+            load();
+          }
+          jumpBtn.addEventListener('click', goToPage);
+          jump.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); goToPage(); } });
+          var pageLbl = document.createElement('span'); pageLbl.textContent = 'pág.';
+          pag.appendChild(pageLbl); pag.appendChild(jump); pag.appendChild(jumpBtn);
         })
         .catch(function (e) { if (String(e.message) !== 'SESSION_EXPIRED') { wrap.textContent = ''; var err = document.createElement('div'); err.className = 'state-box'; err.textContent = 'Error cargando contactos.'; wrap.appendChild(err); } });
     }
@@ -920,6 +1074,41 @@ export function renderDashboardAppHtml(): string {
     });
     document.getElementById('ctTagFilter').addEventListener('change', function () { window.__ctState.offset = 0; load(); });
     document.getElementById('ctStageFilter').addEventListener('change', function () { window.__ctState.offset = 0; load(); });
+  }
+
+  function openConsentModal(contact) {
+    openModal(
+      '<h3>Registrar consentimiento</h3>' +
+      '<p style="font-size:12px;color:var(--text-muted);">Se guarda en el servidor con fecha, canal y texto mostrado.</p>' +
+      '<div class="form-group"><label>Teléfono</label><input id="mConsentPhone" value="' + esc(contact.phone) + '" disabled></div>' +
+      '<div class="form-group"><label>¿Quién autorizó?</label><input id="mConsentWho" value="' + esc(contact.name || '') + '" placeholder="Nombre del titular"></div>' +
+      '<div class="form-group"><label>Canal</label><select id="mConsentChannel"><option value="whatsapp">WhatsApp</option><option value="formulario">Formulario</option><option value="verbal">Verbal</option><option value="csv">CSV / importación</option></select></div>' +
+      '<div class="form-group"><label>Texto mostrado</label><textarea id="mConsentText" rows="2">Acepto recibir mensajes de este negocio por WhatsApp.</textarea></div>' +
+      '<div class="msg" id="mConsentNote" style="display:none"></div>' +
+      '<div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancelar</button><button class="btn btn-accent" id="mOk">Registrar</button></div>'
+    );
+    document.getElementById('mCancel').addEventListener('click', closeModal);
+    document.getElementById('mOk').addEventListener('click', function () {
+      var body = {
+        contactPhone: contact.phone,
+        whoAuthorized: document.getElementById('mConsentWho').value.trim() || contact.phone,
+        channel: document.getElementById('mConsentChannel').value,
+        textShown: document.getElementById('mConsentText').value.trim(),
+        source: 'panel'
+      };
+      api('/api/compliance/consent', { method: 'POST', body: JSON.stringify(body) })
+        .then(function () { closeModal(); toast('Consentimiento registrado en el servidor'); })
+        .catch(function (e) {
+          if (String(e.message) === 'SESSION_EXPIRED') return;
+          var note = document.getElementById('mConsentNote');
+          var why = (e && e.data && e.data.error) ? e.data.error : 'error de red';
+          if (note) {
+            note.style.display = 'block';
+            note.className = 'msg error';
+            note.textContent = 'NO se registró en el servidor (' + why + '). Este consentimiento quedó SOLO en este navegador: no cuenta para la difusión.';
+          }
+        });
+    });
   }
 
   function openContactModal(contact) {
@@ -1029,77 +1218,145 @@ export function renderDashboardAppHtml(): string {
     var root = document.getElementById('viewRoot');
     root.textContent = '';
     var bar = document.createElement('div');
-    bar.style.cssText = 'display:flex; justify-content:flex-end; margin-bottom:12px;';
+    bar.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;';
+    var busca = document.createElement('input');
+    busca.id = 'pkSearch'; busca.type = 'search';
+    busca.placeholder = 'Filtrar por nombre o teléfono…';
+    busca.style.cssText = 'max-width:260px;';
+    busca.setAttribute('aria-label', 'Filtrar tarjetas por nombre o teléfono');
     var bStage = document.createElement('button'); bStage.className = 'btn btn-secondary btn-sm'; bStage.textContent = '⚙️ Gestionar etapas';
     bStage.addEventListener('click', openStagesModal);
-    bar.appendChild(bStage);
+    var spacer = document.createElement('span'); spacer.style.cssText = 'flex:1';
+    bar.appendChild(busca); bar.appendChild(spacer); bar.appendChild(bStage);
     root.appendChild(bar);
     var board = document.createElement('div');
     board.className = 'kanban';
     board.id = 'kanbanBoard';
-    board.innerHTML = '<div class="skeleton" style="width:200px"></div><div class="skeleton" style="width:200px"></div><div class="skeleton" style="width:200px"></div>';
+    board.innerHTML = '<div class="skeleton" style="width:200px"></div>';
     root.appendChild(board);
-    Promise.all([api('/api/pipeline/stages'), api('/api/contacts?limit=200')]).then(function (results) {
-      var stages = results[0].data.stages || [];
-      var contacts = results[1].data.contacts || [];
-      board.textContent = '';
-      if (stages.length === 0) {
-        board.innerHTML = '<div class="state-box">No hay etapas. Crea la primera.</div>';
-        return;
+    var PAGE = 50;
+    var byStage = {};
+    function cardNode(c) {
+      var card = document.createElement('div');
+      card.className = 'kcard';
+      card.draggable = true;
+      card.setAttribute('data-phone', c.phone);
+      var ph = document.createElement('div'); ph.className = 'phone'; ph.textContent = (c.name || '') + ' +' + c.phone;
+      card.appendChild(ph);
+      if ((c.tags || []).length > 0) {
+        var tl = document.createElement('div'); tl.className = 'tagsline';
+        c.tags.forEach(function (t) { var chip = document.createElement('span'); chip.className = 'tag-chip'; chip.textContent = t.name; tl.appendChild(chip); });
+        card.appendChild(tl);
       }
-      stages.forEach(function (s) {
-        var col = document.createElement('div');
-        col.className = 'kcol';
-        col.setAttribute('data-stage', s.id);
-        var head = document.createElement('div'); head.className = 'kcol-head';
-        var nm = document.createElement('span'); nm.textContent = s.name;
-        var cnt = document.createElement('span'); cnt.style.color = 'var(--text-muted)'; cnt.textContent = String(s.contactCount);
-        head.appendChild(nm); head.appendChild(cnt);
-        var body = document.createElement('div'); body.className = 'kcol-body';
-        contacts.filter(function (c) { return c.stage_id === s.id; }).forEach(function (c) {
-          var card = document.createElement('div');
-          card.className = 'kcard';
-          card.draggable = true;
-          card.setAttribute('data-phone', c.phone);
-          var ph = document.createElement('div'); ph.className = 'phone'; ph.textContent = (c.name || '') + ' +' + c.phone;
-          card.appendChild(ph);
-          if ((c.tags || []).length > 0) {
-            var tl = document.createElement('div'); tl.className = 'tagsline';
-            c.tags.forEach(function (t) {
-              var chip = document.createElement('span'); chip.className = 'tag-chip'; chip.textContent = t.name;
-              tl.appendChild(chip);
-            });
-            card.appendChild(tl);
-          }
-          card.addEventListener('dragstart', function (ev) {
-            ev.dataTransfer.setData('text/plain', c.phone);
-            card.style.opacity = '0.5';
-          });
-          card.addEventListener('dragend', function () { card.style.opacity = '1'; });
-          body.appendChild(card);
+      card.addEventListener('dragstart', function (ev) { ev.dataTransfer.setData('text/plain', c.phone); card.style.opacity = '0.5'; });
+      card.addEventListener('dragend', function () { card.style.opacity = '1'; });
+      return card;
+    }
+    function moveCard(phone, stageId, stageName) {
+      var eventId = (crypto.randomUUID ? crypto.randomUUID() : 'ev_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+      api('/api/pipeline/move', { method: 'POST', body: JSON.stringify({ phone: phone, stageId: stageId, eventId: eventId }) })
+        .then(function (r) {
+          if (r.data.duplicate) toast('Movimiento ya aplicado (idempotente)', 'info');
+          else toast('Tarjeta movida a ' + stageName);
+          viewPipeline();
+        })
+        .catch(function (e) {
+          if (String(e.message) !== 'SESSION_EXPIRED') { toast('No se pudo mover la tarjeta', 'err'); viewPipeline(); }
         });
-        col.appendChild(head); col.appendChild(body);
-        col.addEventListener('dragover', function (ev) { ev.preventDefault(); col.classList.add('dragover'); });
-        col.addEventListener('dragleave', function () { col.classList.remove('dragover'); });
-        col.addEventListener('drop', function (ev) {
-          ev.preventDefault();
-          col.classList.remove('dragover');
-          var phone = ev.dataTransfer.getData('text/plain');
-          if (!phone) return;
-          var eventId = (crypto.randomUUID ? crypto.randomUUID() : 'ev_' + Date.now() + '_' + Math.random().toString(36).slice(2));
-          api('/api/pipeline/move', { method: 'POST', body: JSON.stringify({ phone: phone, stageId: s.id, eventId: eventId }) })
+    }
+    function fillColumn(col, stage, search) {
+      var body = col.querySelector('.kcol-body');
+      var st = byStage[stage.id];
+      body.textContent = '';
+      st.items.forEach(function (c) { body.appendChild(cardNode(c)); });
+      if (st.items.length === 0) {
+        var empty = document.createElement('div'); empty.className = 'state-box';
+        empty.textContent = search ? 'Sin coincidencias en esta etapa.' : 'Sin tarjetas en esta etapa.';
+        body.appendChild(empty);
+      }
+      if (st.hasMore) {
+        var more = document.createElement('button');
+        more.className = 'btn btn-ghost btn-sm';
+        more.textContent = '＋ Cargar más de ' + stage.name;
+        more.setAttribute('aria-label', 'Cargar más tarjetas de ' + stage.name);
+        more.addEventListener('click', function () {
+          if (st.loading) return;
+          st.loading = true; more.disabled = true;
+          api('/api/contacts?limit=' + PAGE + '&offset=' + st.items.length + '&stageId=' + encodeURIComponent(stage.id) + '&q=' + encodeURIComponent(search))
             .then(function (r) {
-              if (r.data.duplicate) toast('Movimiento ya aplicado (idempotente)', 'info');
-              else toast('Tarjeta movida a ' + s.name);
-              viewPipeline();
+              var page = r.data.contacts || [];
+              st.items = st.items.concat(page);
+              st.hasMore = page.length === PAGE;
+              st.loading = false;
+              fillColumn(col, stage, search);
             })
             .catch(function (e) {
-              if (String(e.message) !== 'SESSION_EXPIRED') { toast('No se pudo mover la tarjeta', 'err'); viewPipeline(); }
+              st.loading = false; more.disabled = false;
+              if (String(e.message) !== 'SESSION_EXPIRED') toast('No se pudieron cargar más tarjetas', 'err');
             });
         });
-        board.appendChild(col);
+        body.appendChild(more);
+      }
+      var cnt = col.querySelector('.kcount');
+      if (cnt) cnt.textContent = String(stage.contactCount);
+    }
+    function load() {
+      var search = (document.getElementById('pkSearch') || {}).value || '';
+      api('/api/pipeline/stages').then(function (r) {
+        var stages = r.data.stages || [];
+        byStage = {};
+        board.textContent = '';
+        if (stages.length === 0) {
+          board.innerHTML = '<div class="state-box">No hay etapas todavía. Crea la primera con «Gestionar etapas».</div>';
+          return;
+        }
+        var requests = stages.map(function (s) {
+          return api('/api/contacts?limit=' + PAGE + '&offset=0&stageId=' + encodeURIComponent(s.id) + '&q=' + encodeURIComponent(search));
+        });
+        Promise.all(requests).then(function (results) {
+          stages.forEach(function (s, i) {
+            var page = (results[i].data.contacts || []);
+            byStage[s.id] = { items: page, hasMore: page.length === PAGE, loading: false };
+          });
+          stages.forEach(function (s) {
+            var col = document.createElement('div');
+            col.className = 'kcol';
+            col.setAttribute('data-stage', s.id);
+            var head = document.createElement('div'); head.className = 'kcol-head';
+            var nm = document.createElement('span'); nm.textContent = s.name;
+            var cnt = document.createElement('span'); cnt.className = 'kcount'; cnt.style.color = 'var(--text-muted)'; cnt.textContent = String(s.contactCount);
+            head.appendChild(nm); head.appendChild(cnt);
+            var body = document.createElement('div'); body.className = 'kcol-body';
+            col.appendChild(head); col.appendChild(body);
+            col.addEventListener('dragover', function (ev) { ev.preventDefault(); col.classList.add('dragover'); });
+            col.addEventListener('dragleave', function () { col.classList.remove('dragover'); });
+            col.addEventListener('drop', function (ev) {
+              ev.preventDefault();
+              col.classList.remove('dragover');
+              var phone = ev.dataTransfer.getData('text/plain');
+              if (!phone) return;
+              moveCard(phone, s.id, s.name);
+            });
+            board.appendChild(col);
+            fillColumn(col, s, search);
+          });
+        }).catch(function (e) {
+          if (String(e.message) === 'SESSION_EXPIRED') return;
+          board.textContent = '';
+          board.innerHTML = '<div class="state-box">Error cargando las tarjetas del embudo.</div>';
+        });
+      }).catch(function (e) {
+        if (String(e.message) === 'SESSION_EXPIRED') return;
+        board.textContent = '';
+        board.innerHTML = '<div class="state-box">Error cargando el embudo.</div>';
       });
-    }).catch(function (e) { if (String(e.message) !== 'SESSION_EXPIRED') { board.textContent = ''; board.innerHTML = '<div class="state-box">Error cargando el embudo.</div>'; } });
+    }
+    var timer = null;
+    busca.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(load, 350);
+    });
+    load();
   }
 
   function openStagesModal() {
@@ -1845,6 +2102,25 @@ export function renderDashboardAppHtml(): string {
       '<div class="table-wrap" id="supWrap"><div class="skeleton" style="margin:12px; width:50%"></div></div>';
     root.appendChild(card);
     root.appendChild(card2);
+    // F10: estado y caducidad de la sesion.
+    var card3 = document.createElement('div'); card3.className = 'card'; card3.style.marginTop = '16px';
+    card3.innerHTML = '<div class="card-title"><span>Sesión</span></div>' +
+      '<p id="sSessionInfo" style="font-size:12px;color:var(--text-muted);">Comprobando sesión…</p>' +
+      '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn btn-secondary btn-sm" id="sSessionRefresh">Actualizar</button><button class="btn btn-ghost btn-sm" id="sSessionLogout">Cerrar sesión</button></div>';
+    root.appendChild(card3);
+    function renderSession() {
+      var el = document.getElementById('sSessionInfo');
+      if (!el) return;
+      api('/api/session').then(function (r) {
+        var s = r.data;
+        if (!s.expiresAt) { el.textContent = 'Sesión activa (no se pudo leer la caducidad de la cookie).'; return; }
+        var left = Math.max(0, Math.round((s.expiresAt - s.now) / 60000));
+        el.textContent = 'Sesión activa · caduca a las ' + new Date(s.expiresAt).toLocaleTimeString('es') + ' (quedan ' + left + ' de ' + Math.round(s.ttlSeconds / 60) + ' min). Al caducar, la próxima petición te devuelve a /login?expired=1.';
+      }).catch(function (e) { if (String(e.message) !== 'SESSION_EXPIRED') el.textContent = 'No se pudo leer el estado de la sesión.'; });
+    }
+    renderSession();
+    document.getElementById('sSessionRefresh').addEventListener('click', renderSession);
+    document.getElementById('sSessionLogout').addEventListener('click', function () { doLogout(); });
     api('/api/settings').then(function (r) {
       var s = r.data;
       document.getElementById('sBrand').value = s.brandName || '';

@@ -464,8 +464,11 @@ export function listConversations(db: Db, org: string, opts: { q?: string; unrea
   return { conversations: rows, total }
 }
 
-export function getConversationThread(db: Db, org: string, phone: string, opts: { markRead?: boolean } = {}): {
-  conversation: ConversationSummary | null; messages: Array<Record<string, unknown>>
+export function getConversationThread(db: Db, org: string, phone: string, opts: { markRead?: boolean; limit?: number; before?: string } = {}): {
+  conversation: ConversationSummary | null
+  messages: Array<Record<string, unknown>>
+  hasMore: boolean
+  oldestMessageId: string | null
 } {
   const canonical = canonicalizePhone(phone)
   if (!canonical) throw new Error('TELEFONO_INVALID')
@@ -474,14 +477,33 @@ export function getConversationThread(db: Db, org: string, phone: string, opts: 
      LEFT JOIN agents a ON a.organization_id = c.organization_id AND a.id = c.assigned_agent_id
      WHERE c.organization_id = ? AND c.contact_phone = ?`
   ).get(org, canonical) as ConversationSummary | undefined
-  const messages = db.prepare(
+  // Paginación del hilo: ventana de los `limit` mensajes MÁS RECIENTES (50 por
+  // defecto) y, hacia atrás, un cursor (`before` = id del mensaje más antiguo ya
+  // cargado). `hasMore` dice si quedan más antiguos: nunca se corta en silencio.
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
+  const params: Array<string | number> = [org, canonical]
+  let cursorSql = ''
+  if (opts.before) {
+    const anchor = db.prepare(
+      'SELECT created_at FROM messages WHERE organization_id = ? AND conversation_phone = ? AND id = ?'
+    ).get(org, canonical, opts.before) as { created_at: number } | undefined
+    if (anchor) {
+      cursorSql = ' AND (created_at < ? OR (created_at = ? AND id < ?))'
+      params.push(anchor.created_at, anchor.created_at, opts.before)
+    }
+  }
+  const rows = db.prepare(
     `SELECT id, direction, text, status, source, campaign_id AS campaignId, message_id AS messageId, error, created_at AS createdAt
-     FROM messages WHERE organization_id = ? AND conversation_phone = ? ORDER BY created_at ASC, id ASC`
-  ).all(org, canonical)
+     FROM messages WHERE organization_id = ? AND conversation_phone = ?${cursorSql}
+     ORDER BY created_at DESC, id DESC LIMIT ?`
+  ).all(...params, limit + 1) as Array<Record<string, unknown>>
+  const hasMore = rows.length > limit
+  const messages = (hasMore ? rows.slice(0, limit) : rows).reverse()
   if (conversation && opts.markRead) {
     db.prepare('UPDATE conversations SET unread = 0 WHERE organization_id = ? AND contact_phone = ?').run(org, canonical)
   }
-  return { conversation: conversation ?? null, messages }
+  const oldest = messages.length > 0 ? String((messages[0] as Record<string, unknown>).id) : null
+  return { conversation: conversation ?? null, messages, hasMore, oldestMessageId: oldest }
 }
 
 export function recordInboundMessage(db: Db, org: string, input: {

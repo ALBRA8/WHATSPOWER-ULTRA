@@ -25,3 +25,11 @@
 
 ## 6. Integración
 - [ ] Merge autorizado de `repair/produccion-real` → `main`.
+
+## 7. Panel: lo que falta para usarlo con clientes reales (cierre 2026-11-16)
+- [ ] **Número y token de Meta Cloud** reales (por organización) y `ALLOW_REAL_DISPATCH=true` en el entorno: sin eso el panel funciona y prueba todo, pero los envíos salen al transporte de pruebas.
+- [ ] **Secretos reales fuera del repo**: `INTERNAL_API_SECRET` (daemon del CRM) y `WEBHOOK_LEAD_SECRETS` (firma HMAC v2 del webhook y de los leads). El panel solo guarda la máscara de los últimos 4.
+- [ ] **Revisión visual** del panel frente al original (capturas del dueño): el cierre fue funcional, no visual.
+- [ ] **Abrirlo en un navegador de verdad y a 390 px** (móvil): aquí no hay navegador (el consentimiento para abrirlo se denegó), así que lo responsive está comprobado leyendo las reglas y los atributos de la página servida, no viéndolo. Ruta: `npm run dev` (o el arranque que uses) y abrir `/`, luego `/` con la ventana estrecha o el móvil.
+- [ ] **Probar el flujo real de consentimiento** con un contacto de prueba y confirmar que aparece en el reporte de cumplimiento.
+- [ ] **Decidir sobre el chatbot** que anuncia la web de ventas: el original NO lo trae como pantalla (inventario §4.1–4.13), así que no está en el panel; si se quiere, es un desarrollo nuevo, no una paridad pendiente.
