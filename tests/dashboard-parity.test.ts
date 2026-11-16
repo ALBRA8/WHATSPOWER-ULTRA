@@ -558,3 +558,79 @@ describe('DASHBOARD PARIDAD — resumen y aislamiento', () => {
     } finally { await h.close() }
   })
 })
+
+describe('DASHBOARD PARIDAD — flujos F2/F8/F9/F12 (cierre de panel)', () => {
+  // F2: Onboarding saltable, no vuelve a salir, lleva al Resumen
+  it('DP-23 (F2): onboarding se puede saltar y no vuelve a aparecer', async () => {
+    const h = await startDashboardServer()
+    try {
+      await h.login()
+      // Al inicio, onboarding NO está completado
+      let s = await api(h, '/api/settings')
+      assert.equal(s.status, 200)
+      assert.equal(s.data.onboardingCompletedAt, null, 'onboarding pendiente al inicio')
+      // Marcar como completado (equivale a "saltar" o "terminar")
+      const put = await api(h, '/api/settings', { method: 'PUT', body: { onboardingCompleted: true } })
+      assert.equal(put.status, 200)
+      assert.ok(put.data.onboardingCompletedAt > 0, 'queda registrado con timestamp')
+      // Volver a pedir settings: ya no aparece como pendiente
+      s = await api(h, '/api/settings')
+      assert.ok(s.data.onboardingCompletedAt > 0, 'no vuelve a salir')
+    } finally { await h.close() }
+  })
+
+  // F8: Historial de campañas carga la lista real
+  it('DP-24 (F8): historial de campañas lista campañas reales con sus contadores', async () => {
+    const h = await startDashboardServer()
+    try {
+      await h.login()
+      // Crear dos campañas
+      await api(h, '/api/campaigns', { method: 'POST', body: { name: 'Hist A', templateSpintax: 'Hola', csvContent: 'phone,name\n573001112200,A' } })
+      await api(h, '/api/campaigns', { method: 'POST', body: { name: 'Hist B', templateSpintax: 'Hola', csvContent: 'phone,name\n573001112201,B' } })
+      // GET /api/campaigns devuelve {campaigns: [...]} (lo que usa loadCampaignsList)
+      const lista = await api(h, '/api/campaigns')
+      assert.equal(lista.status, 200)
+      const arr = lista.data.campaigns || lista.data
+      assert.ok(Array.isArray(arr))
+      assert.equal(arr.length, 2, 'historial muestra las dos campañas')
+      const nombres = arr.map((c: any) => c.name).sort()
+      assert.deepEqual(nombres, ['Hist A', 'Hist B'])
+    } finally { await h.close() }
+  })
+
+  // F9: Supresión (bajas) con alta y listado real
+  it('DP-25 (F9): alta y listado de supresión (bajas) funciona contra el endpoint real', async () => {
+    const h = await startDashboardServer()
+    try {
+      await h.login()
+      // Alta de un número en la lista de supresión (devuelve 201 Created)
+      const alta = await api(h, '/api/suppression', { method: 'POST', body: { phone: '573009998877', reason: 'Solicitó baja en chat' } })
+      assert.ok(alta.status === 200 || alta.status === 201, 'alta responde 200 o 201')
+      // Listado trae el número dado de baja
+      const lista = await api(h, '/api/suppression')
+      assert.equal(lista.status, 200)
+      const arr = lista.data.suppression || lista.data || []
+      const phones = arr.map((s: any) => s.phone)
+      assert.ok(phones.includes('573009998877'), 'el número dado de baja aparece en la lista')
+    } finally { await h.close() }
+  })
+
+  // F12: Cada endpoint real tiene los 3 estados (vacío, con datos, error)
+  it('DP-26 (F12): estado vacío real — sin datos, summary devuelve ceros (no inventa)', async () => {
+    const h = await startDashboardServer()
+    try {
+      await h.login()
+      const s = await api(h, '/api/dashboard/summary')
+      assert.equal(s.status, 200)
+      // Sin campañas ni contactos, los contadores son 0 (no inventados)
+      assert.equal(s.data.campaignsTotal, 0)
+      assert.equal(s.data.contactsTotal, 0)
+      assert.equal(s.data.sentTotal, 0)
+      assert.equal(s.data.clicks, 0)
+      // La lista de contactos también está vacía
+      const c = await api(h, '/api/contacts')
+      assert.equal(c.status, 200)
+      assert.equal((c.data.contacts || c.data || []).length, 0, 'sin contactos inventados')
+    } finally { await h.close() }
+  })
+})
