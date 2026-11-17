@@ -424,8 +424,9 @@ export function productionConfigProblems(env: NodeJS.ProcessEnv = process.env): 
 
   // (reparación FASE 1.D) WORKER_DISABLE_PACING desactiva el throttling
   // anti-baneo del worker: en producción es un riesgo de bloqueo del número.
+  // En desarrollo/laboratorio sigue siendo legítimo (compatibilidad).
   const disablePacing = String(env.WORKER_DISABLE_PACING || '').trim().toLowerCase()
-  if (disablePacing === '1' || disablePacing === 'true') {
+  if (env.NODE_ENV === 'production' && (disablePacing === '1' || disablePacing === 'true')) {
     problems.push('WORKER_DISABLE_PACING: activo en producción — el pacing anti-baneo es OBLIGATORIO; desactívalo solo para laboratorio')
   }
 

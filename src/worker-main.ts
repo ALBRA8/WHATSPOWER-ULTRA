@@ -51,6 +51,17 @@ if (isProduction) {
   }
 }
 
+// (reparación 2026-11-17, FASE 1.D) Guard EXPLÍCITO de pacing: el throttling
+// anti-baneo es OBLIGATORIO en producción. WORKER_DISABLE_PACING=1|true aborta
+// el proceso con código 1 aunque el guard general hubiese sido omitido.
+// Sin pacing el número acaba bloqueado por Meta — es una puerta de protección
+// del canal, no una preferencia de rendimiento.
+const pacingDisabled = ['1', 'true'].includes(String(process.env.WORKER_DISABLE_PACING || '').trim().toLowerCase())
+if (isProduction && pacingDisabled) {
+  console.error('[worker 2B ✋] Arranque bloqueado: WORKER_DISABLE_PACING está prohibido en producción (el pacing anti-baneo protege el número)')
+  process.exit(1)
+}
+
 if (process.env.ALLOW_REAL_DISPATCH !== 'true') {
   console.warn('[worker 2B AVISO] ALLOW_REAL_DISPATCH != true: todo despacho quedará BLOQUEADO por la salvaguarda (fail-closed).')
 }
