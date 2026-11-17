@@ -3,7 +3,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
-import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual, STUDIO_SESSION_COOKIE } from './security.ts'
+import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual, resolveClientIp, trustProxyEnabled, STUDIO_SESSION_COOKIE } from './security.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
@@ -279,7 +279,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         return
       }
       // Throttle mínimo en memoria (10 intentos/min por IP): anti fuerza bruta
-      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local'
+      // (reparación 2026-11-17) IP del SOCKET salvo TRUST_PROXY=true (jamás
+      // x-forwarded-for crudo, falsificable por el cliente).
+      const ip = resolveClientIp(req, trustProxyEnabled())
       const nowMs = Date.now()
       const bucket = studioLoginAttempts.get(ip)
       if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
@@ -303,7 +305,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         res.end(JSON.stringify({ error: 'Credencial administrativa inválida' }))
         return
       }
-      studioLoginAttempts.delete(ip)
+      // (reparación 2026-11-17) el contador NO se borra al acertar: los intentos
+      // se acumulan dentro de la ventana (60 s) para cerrar el bypass por fuerza
+      // bruta (aciertos intercalados entre fallos). El bucket expira solo.
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Set-Cookie': issueStudioSession(matchIdx, adminKeys[matchIdx].key),
@@ -312,10 +316,17 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       return
     }
 
-    // 0.a. Login DEMO (sin registro): solo cuando DEMO_MODE=true en .env.
+    // 0.a. Login DEMO (sin registro): solo cuando DEMO_MODE=true en .env y
+    // FUERA de producción (reparación 2026-11-17: 403 SIEMPRE con
+    // NODE_ENV=production, aunque DEMO_MODE hubiese quedado activo en env).
     // Emite una sesión con la PRIMERA identidad de ADMIN_API_KEYS.
-    // En producción: DEMO_MODE debe estar ausente o false — el endpoint devuelve 403.
     if (req.method === 'POST' && url.pathname === '/studio/login-demo') {
+      if (process.env.NODE_ENV === 'production') {
+        console.warn('[Seguridad 2B ALERTA] Intento de login-demo en PRODUCCIÓN (bloqueado)')
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Forbidden: el login demo está prohibido en producción' }))
+        return
+      }
       const demoEnabled = String(process.env.DEMO_MODE || '').toLowerCase() === 'true'
       if (!demoEnabled || adminKeys.length === 0) {
         res.writeHead(403, { 'Content-Type': 'application/json' })
@@ -323,7 +334,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         return
       }
       // Throttle anti-abuso del demo (mismo bucket que login normal)
-      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local'
+      const ip = resolveClientIp(req, trustProxyEnabled())
       const nowMs = Date.now()
       const bucket = studioLoginAttempts.get(ip)
       if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
@@ -332,7 +343,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         res.end(JSON.stringify({ error: 'Demasiados intentos. Inténtalo más tarde.' }))
         return
       }
-      studioLoginAttempts.delete(ip)
+      // (reparación 2026-11-17) sin delete(ip) al acertar: los intentos
+      // acumulan en la ventana aunque el demo conceda sesión (anti fuerza bruta).
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Set-Cookie': issueStudioSession(0, adminKeys[0].key),

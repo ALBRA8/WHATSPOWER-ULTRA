@@ -307,6 +307,32 @@ export function readBody(req: import('node:http').IncomingMessage, maxBytes: num
   })
 }
 
+/**
+ * (reparación 2026-11-17) Extracción de IP del cliente para throttles/auditoría.
+ * Por defecto usa SOLO la IP del socket TCP (no falsificable desde el cliente).
+ * El header x-forwarded-for se respeta ÚNICAMENTE con TRUST_PROXY=true|1
+ * (alineado con WHATSPOWER): detrás de un proxy inverso declarado, la primera
+ * entrada es la IP real del cliente; sin proxy declarado, el header es controlado
+ * por el atacante y JAMÁS se usa.
+ */
+export function trustProxyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1'
+}
+
+export function resolveClientIp(
+  req: { socket?: { remoteAddress?: string | null }; headers: Record<string, unknown> },
+  trustProxy: boolean = trustProxyEnabled(),
+): string {
+  if (trustProxy) {
+    const xff = req.headers['x-forwarded-for']
+    if (typeof xff === 'string' && xff.trim()) {
+      const first = xff.split(',')[0]?.trim()
+      if (first) return first
+    }
+  }
+  return req.socket?.remoteAddress || 'local'
+}
+
 /** Validación de fortaleza de un secreto de webhook (sin exponer el valor). */
 function leadSecretStrengthProblems(name: string, entry: string, weakDefaults: string[]): string[] {
   const problems: string[] = []
@@ -388,6 +414,21 @@ export function productionConfigProblems(env: NodeJS.ProcessEnv = process.env): 
       problems.push('ALLOW_REAL_DISPATCH: no está en true — los envíos de Meta Cloud quedarán BLOQUEADOS (fail-closed); actívala solo con autorización expresa')
     }
   }
+
+  // (reparación 2026-11-17) El login DEMO otorga sesión admin SIN registro:
+  // es un mecanismo estrictamente de desarrollo local. En producción es un
+  // problema FATAL aunque la variable haya quedado activa por descuido.
+  if (env.NODE_ENV === 'production' && String(env.DEMO_MODE || '').toLowerCase() === 'true') {
+    problems.push('DEMO_MODE: activo en producción — el acceso admin sin registro (/studio/login-demo) está prohibido; úsalo solo en desarrollo local')
+  }
+
+  // (reparación FASE 1.D) WORKER_DISABLE_PACING desactiva el throttling
+  // anti-baneo del worker: en producción es un riesgo de bloqueo del número.
+  const disablePacing = String(env.WORKER_DISABLE_PACING || '').trim().toLowerCase()
+  if (disablePacing === '1' || disablePacing === 'true') {
+    problems.push('WORKER_DISABLE_PACING: activo en producción — el pacing anti-baneo es OBLIGATORIO; desactívalo solo para laboratorio')
+  }
+
   return problems
 }
 
