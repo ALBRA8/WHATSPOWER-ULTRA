@@ -2035,6 +2035,12 @@ export function renderDashboardAppHtml(): string {
     var card = document.createElement('div'); card.className = 'card';
     card.innerHTML = '<div class="card-title"><span>Transporte de salida</span></div>' +
       '<div class="form-group"><label>Motor</label><select id="tEngine"><option value="daemon">Daemon WhatsApp del CRM (Baileys, localhost:3002)</option><option value="meta_cloud">Meta WhatsApp Cloud API (por organización)</option></select></div>' +
+      '<div id="baileysRiskWarning" style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 14px;padding:10px 12px;border:1px solid #f0b429;background:rgba(240,180,41,0.12);border-radius:8px;">' +
+        '<span aria-hidden="true">⚠️</span>' +
+        '<p style="font-size:12px;color:var(--text);margin:0;">' +
+          '<strong>Aviso Importante:</strong> el canal Baileys es un canal <strong>NO oficial</strong> de WhatsApp. Su uso conlleva riesgo inherente de bloqueo o suspensión del número por parte de Meta. Se recomienda calentar líneas (envíos graduales con pacing) y usar números secundarios, nunca el número principal del negocio.' +
+        '</p>' +
+      '</div>' +
       '<div id="daemonFields">' +
         '<div class="form-group"><label>URL del daemon (ej. http://localhost:3002)</label><input id="tDaemonUrl" placeholder="http://localhost:3002"></div>' +
         '<div class="form-group"><label>Nuevo secreto del daemon (OPCIONAL — solo se guarda la máscara de los últimos 4; el real vive en INTERNAL_API_SECRET del entorno)</label><input id="tDaemonSecret" type="password" placeholder="sin cambios"></div>' +

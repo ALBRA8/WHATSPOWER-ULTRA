@@ -3,6 +3,8 @@
 > **Suite de Difusión Masiva y Escudo Anti-Ban para el Ecosistema CRM ALBRA**  
 > Diseñado bajo metodología Clean-Room / ClonaKit. Funciona como un "enchufe" ("anillo al dedo"): opera de manera 100% autónoma junto a **CRM-ALBRA (Nivel 1)** sin requerir obligatoriamente el Nivel 2, o se integra con **WHATSPOWER (Nivel 2)** para respetar los locks de atención humana y flujos conversacionales.
 
+> ⚠️ **Aviso Importante — Canal no oficial de WhatsApp**: el transporte Baileys (daemon de WhatsApp del CRM) es un canal **no oficial** basado en emulación de WhatsApp Web. Su uso conlleva **riesgo inherente de bloqueo o suspensión del número por parte de Meta**. Se recomienda **calentar líneas** (envíos graduales con el pacing del worker) y usar **números secundarios**, nunca el número principal del negocio. Para producción comercial, usa el transporte oficial **Meta WhatsApp Cloud API**.
+
 ---
 
 ## 🚀 Capacidades Principales de Difusión Masiva y Protección Anti-Ban
