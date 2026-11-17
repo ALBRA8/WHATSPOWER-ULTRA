@@ -79,6 +79,14 @@ Abrir en el navegador:
 
 Las direcciones antiguas `/app/` y `/panel` ya no abren una segunda aplicación: redirigen a `/`. El detalle está en `docs/sitio-y-panel.md`.
 
+### 3.b. Acceso directo al ecosistema desde el CRM (SSO de un solo uso)
+El botón **Ecosistema** del CRM (capa 1) abre este dashboard con sesión de operador, sin repetir
+credenciales: el CRM emite un enlace firmado de UN SOLO USO (`ECOSYSTEM_SSO_SECRET` compartido,
+HMAC-SHA256, TTL 90 s) que se canjea en `GET /studio/login-ecosystem` (302 a `/` con cookie
+HttpOnly). Es un SSO consciente del dueño: funciona en producción SOLO con el secreto configurado
+(fail-closed: 404 sin él); el login-demo ANÓNIMO conserva su bloqueo total en producción.
+Pruebas: `tests/ecosystem-login.test.ts`.
+
 ### 3.b. Modo claro/oscuro
 El dashboard tiene un toggle de tema en el topbar (botón 🌙/☀️). Un clic cambia entre modo oscuro (por defecto) y modo claro. La preferencia se guarda en `localStorage` y se restaura al recargar.
 

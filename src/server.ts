@@ -4,6 +4,7 @@ import { createBroadcastDatabase, writeAudit } from './db.ts'
 import { BroadcastEngine } from './queue/broadcast-worker.ts'
 import { transitionCampaignStatus } from './queue/campaign-lifecycle.ts'
 import { issueStudioSession, resolveStudioSession, RateLimiter, safeEqual, resolveClientIp, trustProxyEnabled, STUDIO_SESSION_COOKIE } from './security.ts'
+import { verifyEcosystemToken, SingleUseJti } from './ecosystem-sso.ts'
 import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
@@ -220,6 +221,8 @@ export function createBroadcastServer(options?: {
   }
 
   const studioLoginAttempts = new Map<string, { count: number; resetAt: number }>()
+  // (ecosistema 2026-11-17) jti de enlaces SSO del CRM: un solo canje por enlace
+  const ecosystemJti = new SingleUseJti()
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
@@ -350,6 +353,48 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         'Set-Cookie': issueStudioSession(0, adminKeys[0].key),
       })
       res.end(JSON.stringify({ ok: true, sessionTtlSeconds: 3600, demo: true }))
+      return
+    }
+
+    // 0.a-bis. Canje del ENLACE de ECOSISTEMA emitido por el CRM (2026-11-17):
+    // HMAC-SHA256 con TTL de 90 s y UN solo uso, emitido por el CRM SOLO a
+    // sesiones autenticadas (demo o real). NO es el login-demo anónimo (sus
+    // reglas quedan intactas); es el SSO consciente del dueño: funciona en
+    // producción SOLO si ECOSYSTEM_SSO_SECRET está configurado (fail-closed:
+    // sin el secreto la ruta NO existe → 404).
+    if (req.method === 'GET' && url.pathname === '/studio/login-ecosystem') {
+      const ssoSecret = process.env.ECOSYSTEM_SSO_SECRET
+      if (!ssoSecret) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Not Found' }))
+        return
+      }
+      const ip = resolveClientIp(req, trustProxyEnabled())
+      const nowMs = Date.now()
+      const bucket = studioLoginAttempts.get(ip)
+      if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
+      else if (++bucket.count > 10) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Demasiados intentos. Inténtalo más tarde.' }))
+        return
+      }
+      const verdict = verifyEcosystemToken(String(url.searchParams.get('token') || ''), ssoSecret)
+      if (!verdict.ok || !ecosystemJti.claim(verdict.payload.jti)) {
+        console.warn(`[Seguridad 2B ALERTA] Canje ecosystem rechazado: ${verdict.ok ? 'jti ya utilizado' : verdict.reason} (IP: ${ip})`)
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Enlace de ecosistema inválido, expirado o ya utilizado' }))
+        return
+      }
+      if (adminKeys.length === 0) {
+        res.writeHead(503, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Service Unavailable: sin ADMIN_API_KEYS (fail-closed)' }))
+        return
+      }
+      res.writeHead(302, {
+        'Set-Cookie': issueStudioSession(0, adminKeys[0].key),
+        Location: '/',
+      })
+      res.end()
       return
     }
 
