@@ -1,5 +1,38 @@
 # AUDIT_REPORT — WHATSPOWER-ULTRA
 
+## Actualización 2026-11-17 — Reparación técnica y auditoría de producción (FASE 1-5)
+
+**Rama:** `repair/produccion-real` · **Método:** TDD (prueba que falla antes y pasa después) + verificación real (no solo compilación).
+
+### Puertas de calidad (ejecutadas al cierre de la sesión)
+| Verificación | Resultado |
+|---|---|
+| `tsc --noEmit` | 0 errores |
+| `npm test` (node:test, 50 suites) | **269/269 PASS** |
+| `npm run test:security` | 2/2 PASS |
+| `npm run security:scan` | 0 secretos en el árbol |
+| Simulación E2E flujo cruzado | **7/7 PASS** (`tests/e2e-cross-flow.test.ts`) |
+
+### Hallazgos resueltos con evidencia
+
+| ID | Severidad | Hallazgo | Reparación (commit) | Prueba |
+|---|---|---|---|---|
+| H-1 | **CRÍTICO** | `npm run worker` construía `BroadcastEngine` SIN `ConsentStore`: el chequeo JIT de consentimiento (Ley 1581) se saltaba por completo y las bajas no revocaban consentimiento | Constructor fail-closed (`CONSENT_STORE_REQUIRED`) + cableado en `worker-main.ts` + chequeo JIT incondicional (4794444) | `tests/worker-consent.test.ts` (5) |
+| H-2 | **ALTO** | `/studio/login-demo` concedía sesión admin en producción si `DEMO_MODE=true` quedaba activo; el rate limiter borraba el contador tras cada éxito (bypass de fuerza bruta) y usaba `x-forwarded-for` crudo | 403 incondicional en producción; validación en `productionConfigProblems`; intentos acumulativos; `resolveClientIp` con TRUST_PROXY (ab524ce) | `tests/login-demo-hardening.test.ts` (6) |
+| H-3 | ALTO | `WORKER_DISABLE_PACING=1` desactivaba el throttling anti-baneo sin restricción | Problema fatal en `productionConfigProblems` + guard explícito con exit 1 en `worker-main.ts`; legítimo solo en desarrollo (df13523) | `tests/pacing-guard.test.ts` (4, proceso hijo real) |
+| H-4 | MEDIO | El rastreo de clics `/t/:code` tenía el hash de IP cableado pero sin suite dedicada verificable como hallazgo | Suite dedicada: IP jamás cruda, hash determinista, TRUST_PROXY estricto (4ac7996) | `tests/tracking-ip-hash.test.ts` (6) |
+| H-5 | MEDIO | Normalización del teléfono en la lista de supresión: baja `+57…` no coincidía con contacto `573…` (el JIT anti-baja comparaba formatos) | Normalización canónica en `LocalSuppressionStore` (altas, consultas, bajas) (9cbd4d0) | `tests/e2e-cross-flow.test.ts` (7) |
+| H-6 | INFO | Aviso de canal no oficial Baileys ausente en README y UI | Aviso destacado en README + caja de aviso en Integraciones → Transporte (aa81718) | Inspección + suite en verde |
+| H-7 | INFO | Falta decisión documentada de runtime y procedimiento de respaldo | `DOCS/DECISION_SQLITE_TYPES.md`; `backup-db.ts`/`restore-db.ts` probados; RUNBOOK §3.1-§3.2 (b261f5f) | Scripts ejecutados con datos ficticios |
+
+### Qué queda pendiente y por qué
+- **Docker compose build**: sin docker en el entorno de trabajo; Dockerfile/compose presentes y revisados estáticamente → tarea del PC (`OWNER_TODO.md` §4).
+- **Canal Meta Cloud oficial**: requiere cuenta Meta Business verificada, número oficial y plantillas aprobadas por el dueño (`OWNER_TODO.md` §2). El adaptador por organización ya existe; NO se migró Baileys (regla del encargo).
+- **Rotación multi-cuenta automática**: NO implementada (sin código); declarada como pendiente en la matriz de paridad sincerada (`CONTEXTO CRM/PARIDAD_WHATSON_WHATSPOWER_ULTRA.md` en el repo CRM).
+
+---
+
+
 ## Actualización 2026-11-15 — Producción real (rama `repair/produccion-real`)
 
 **Método:** línea base completa ejecutada sobre la rama (FASE 1-4 de la sesión anterior re-verificadas en verde), mejora operativa con suite completa, E2E con los 3 servicios reales en simulación y prueba de studio en navegador real.

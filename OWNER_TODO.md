@@ -1,6 +1,19 @@
 # OWNER_TODO — Acciones que SOLO el dueño puede ejecutar
 
-**Actualizado:** 2026-11-15 · **Rama:** `repair/produccion-real`
+**Actualizado:** 2026-11-17 · **Rama:** `repair/produccion-real`
+
+## 0. Nuevas tareas de esta sesión (reparación 2026-11-17)
+- [ ] **Rotar el PAT de GitHub** usado en esta sesión (estuvo en texto de chat) tras validar el push: revocar y crear uno con alcance mínimo (`repo` de los 3 repos).
+- [ ] **Docker compose build + up en el PC** (sin docker en el entorno de trabajo): `docker compose build` de ULTRA y del CRM; verificar arranque de server + worker + daemon.
+- [ ] **Instalar el unit systemd del daemon** (RUNBOOK §3.1): copiar la unit de referencia a `/etc/systemd/system/albra-daemon.service`, ajustar `WorkingDirectory` y `systemctl enable --now`.
+- [ ] **Programar respaldo diario de la BD**: cron/tarea programada con `node --experimental-strip-types scripts/backup-db.ts` (ver RUNBOOK §3.2) y verificar la restauración una vez al mes.
+- [ ] **Confirmar DEMO_MODE=false en el .env de producción** y `TRUST_PROXY=true` SOLO si hay proxy inverso de confianza delante.
+- [ ] **Contratar líneas SIM secundarias para calentamiento** (jamás el número principal) y definir el ritmo de calentamiento del pacing antes de la primera campaña real.
+
+---
+
+
+
 
 ## 1. Credenciales y seguridad
 - [ ] **Rotar el PAT de GitHub** compartido en chat (tras el merge, revocar y crear uno con alcance mínimo).

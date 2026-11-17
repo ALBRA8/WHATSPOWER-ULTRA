@@ -1,4 +1,30 @@
-# MATRIZ DE PRODUCCIÓN REAL — WHATSPOWER-ULTRA (2026-11-15)
+# MATRIZ DE PRODUCCIÓN REAL — WHATSPOWER-ULTRA (2026-11-17)
+
+**Rama:** `repair/produccion-real` · **Método:** cada casilla con evidencia EJECUTADA en esta sesión.
+
+## Veredicto final transparente (sesión reparación 2026-11-17)
+
+| Área | Veredicto | Evidencia |
+|---|---|---|
+| Consentimiento Ley 1581 en worker | ✅ CERRADO | `ConsentStore` obligatorio fail-closed; JIT incondicional; bajas revocan — 269/269 |
+| Login demo / rate limit | ✅ CERRADO | 403 en producción; intentos acumulativos; IP por socket salvo TRUST_PROXY |
+| Pacing anti-baneo | ✅ CERRADO | WORKER_DISABLE_PACING prohibido en producción (exit 1, proceso hijo real) |
+| Rastreo de clics anónimo | ✅ CERRADO | IP hasheada sha256(ip:salt)[:16], TRUST_PROXY estricto — suite dedicada |
+| Circuito de bajas (normalización) | ✅ CERRADO | Teléfono normalizado en supresión (baja +57… ≡ contacto 573…) |
+| Flujo cruzado CRM→ULTRA | ✅ VERIFICADO | 7/7 en `tests/e2e-cross-flow.test.ts` (sin envío real; salvaguarda física probada) |
+| Node 22 / runtime | ✅ ALINEADO | engines >=22.12.0 + .nvmrc 22.14 en los 3 repos; decisión documentada |
+| Respaldo/restauración BD | ✅ OPERATIVO | backup-db.ts + restore-db.ts probados con datos ficticios |
+| Aviso canal no oficial | ✅ DOCUMENTADO | README + UI de transporte |
+| Docker compose | ⛔ PENDIENTE (dueño) | Sin docker en el entorno; Dockerfile/compose revisados estáticamente |
+| Canal Meta Cloud oficial | ⛔ PENDIENTE (dueño) | Requiere cuenta Meta Business verificada + número + plantillas |
+| Rotación multi-cuenta automática | ⛔ NO IMPLEMENTADA | Sin código; declarado honestamente en la matriz de paridad |
+| Despacho real (WhatsApp) | 🟦 BLINDADO | `ALLOW_REAL_DISPATCH=false` por defecto: jamás envío real sin orden expresa |
+
+**Veredicto de la sesión: reparación de producción COMPLETA en código y pruebas; los pendientes requieren exclusivamente acción del dueño (credenciales, Meta, docker, SIM de calentamiento).**
+
+---
+
+# MATRIZ DE PRODUCCIÓN REAL — WHATSPOWER-ULTRA (histórico 2026-11-15) (2026-11-15)
 
 **Rama:** `repair/produccion-real` · **Método:** evidencia EJECUTADA por casilla.
 
