@@ -10,6 +10,7 @@ import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
 import { ConsentStore } from './safety/consent-store.ts'
 import { renderCampaignStudioHtml } from './studio/campaign-studio-html.ts'
+import { renderEcosystemErrorHtml, ecosystemErrorCopy } from './studio/ecosystem-error-html.ts'
 // (paridad dashboard 2026-11-15) UI completa + endpoints del dashboard de paridad.
 // Todo ADITIVO: las rutas y el esquema existentes del motor de broadcast no cambian.
 import { renderDashboardLoginHtml, renderDashboardAppHtml } from './studio/dashboard-html.ts'
@@ -365,8 +366,11 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     if (req.method === 'GET' && url.pathname === '/studio/login-ecosystem') {
       const ssoSecret = process.env.ECOSYSTEM_SSO_SECRET
       if (!ssoSecret) {
-        res.writeHead(404, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Not Found' }))
+        // (2026-11-17 bis) fail-closed EXPLICADO: página HTML con el motivo y
+        // el enlace de vuelta al CRM — jamás un JSON crudo ni un body vacío.
+        const copy = ecosystemErrorCopy('ECOSYSTEM_SSO_SECRET no configurado (ruta deshabilitada)', false)
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(renderEcosystemErrorHtml(copy))
         return
       }
       const ip = resolveClientIp(req, trustProxyEnabled())
@@ -374,15 +378,20 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       const bucket = studioLoginAttempts.get(ip)
       if (!bucket || bucket.resetAt <= nowMs) studioLoginAttempts.set(ip, { count: 1, resetAt: nowMs + 60_000 })
       else if (++bucket.count > 10) {
-        res.writeHead(429, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Demasiados intentos. Inténtalo más tarde.' }))
+        res.writeHead(429, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(renderEcosystemErrorHtml({
+          title: 'Demasiados intentos',
+          detail: 'Se alcanzó el límite de canjes por minuto (protección anti-abuso). Espera un momento y vuelve a abrir la capa desde el botón Ecosistema del CRM.',
+        }))
         return
       }
       const verdict = verifyEcosystemToken(String(url.searchParams.get('token') || ''), ssoSecret)
       if (!verdict.ok || !ecosystemJti.claim(verdict.payload.jti)) {
+        const jtiUsed = verdict.ok // verdict.ok=true aquí significa jti ya canjeado
         console.warn(`[Seguridad 2B ALERTA] Canje ecosystem rechazado: ${verdict.ok ? 'jti ya utilizado' : verdict.reason} (IP: ${ip})`)
-        res.writeHead(403, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Enlace de ecosistema inválido, expirado o ya utilizado' }))
+        const copy = ecosystemErrorCopy(verdict.ok ? 'jti ya utilizado' : verdict.reason, jtiUsed)
+        res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(renderEcosystemErrorHtml(copy))
         return
       }
       if (adminKeys.length === 0) {

@@ -30,13 +30,26 @@ interface Resp {
 }
 
 function get(port: number, path: string): Promise<Resp> {
+  return req(port, path, 'GET')
+}
+
+function req(
+  port: number,
+  path: string,
+  method: 'GET' | 'POST',
+  opts: { cookie?: string; body?: string; headers?: Record<string, string> } = {}
+): Promise<Resp> {
   return new Promise((resolve, reject) => {
-    const r = request(`http://127.0.0.1:${port}${path}`, { method: 'GET' }, (res) => {
+    const headers: Record<string, string> = { ...(opts.headers || {}) }
+    if (opts.cookie) headers['Cookie'] = opts.cookie
+    if (opts.body) headers['Content-Type'] = 'application/json'
+    const r = request(`http://127.0.0.1:${port}${path}`, { method, headers }, (res) => {
       let data = ''
       res.on('data', (c) => (data += c))
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }))
     })
     r.on('error', reject)
+    if (opts.body) r.write(opts.body)
     r.end()
   })
 }
@@ -191,6 +204,62 @@ test('ECOSISTEMA — /studio/login-ecosystem (canje SSO de un solo uso)', async 
       const res = await get(port, '/studio/login-ecosystem?token=x')
       assert.equal(res.status, 404)
       assert.equal(res.headers['set-cookie'], undefined)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      restore()
+    }
+  })
+
+  await t.test('9. CADENA DE ACEPTACIÓN: canje → cookie → GET /api/campaigns responde 200 (no 401)', async () => {
+    const { server, restore } = bootServer()
+    process.env.ECOSYSTEM_SSO_SECRET = SSO_SECRET
+    const port = await listenEphemeral(server)
+    try {
+      const token = signEcosystemToken(SSO_SECRET)
+      const redemption = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(token)}`)
+      assert.equal(redemption.status, 302)
+      const cookiePair = String(redemption.headers['set-cookie']).split(';')[0]
+      assert.ok(cookiePair.startsWith('wp_ultra_studio_session='), 'cookie de sesión emitida por el canje')
+      // Con la cookie del canje, el listado de campañas responde 200 — paso 6
+      // del guion de aceptación del dueño (dashboard con datos, sin prompt).
+      const campaigns = await req(port, '/api/campaigns', 'GET', { cookie: cookiePair })
+      assert.equal(campaigns.status, 200, 'la sesión del canje autoriza /api/campaigns')
+      const parsed = JSON.parse(campaigns.body)
+      assert.ok(Array.isArray(parsed.campaigns), 'el body es el listado JSON de campañas')
+      // Y sin cookie sigue 401: la sesión es la única llave.
+      const anon = await get(port, '/api/campaigns')
+      assert.equal(anon.status, 401)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      restore()
+    }
+  })
+
+  await t.test('10. Fallo del canje responde PÁGINA HTML con motivo y “Volver al CRM”', async () => {
+    const { server, restore } = bootServer()
+    process.env.ECOSYSTEM_SSO_SECRET = SSO_SECRET
+    const port = await listenEphemeral(server)
+    try {
+      // Reutilizado → 403 HTML: motivo “ya fue utilizado” + botón volver.
+      const token = signEcosystemToken(SSO_SECRET)
+      await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(token)}`)
+      const replay = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(token)}`)
+      assert.equal(replay.status, 403)
+      assert.ok(String(replay.headers['content-type']).includes('text/html'), 'la respuesta de fallo es HTML, no JSON crudo')
+      assert.ok(replay.body.includes('ya fue utilizado'), 'el motivo (enlace ya usado) es visible para el dueño')
+      assert.ok(replay.body.includes('Volver al CRM'), 'hay camino de salida hacia el CRM')
+      // Caducado → 403 HTML: motivo “caducado”.
+      const expired = signEcosystemToken(SSO_SECRET, Date.now() - 10 * 60_000)
+      const exp = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(expired)}`)
+      assert.equal(exp.status, 403)
+      assert.ok(exp.body.includes('caducado'), 'el motivo (TTL de 90 s) es visible')
+      // Sin secreto → 404 HTML: fail-closed explicado (también en producción).
+      delete process.env.ECOSYSTEM_SSO_SECRET
+      const unconfigured = await get(port, '/studio/login-ecosystem?token=x')
+      assert.equal(unconfigured.status, 404)
+      assert.ok(String(unconfigured.headers['content-type']).includes('text/html'))
+      assert.ok(unconfigured.body.includes('no configurado'), 'el fail-closed se explica, no se oculta')
+      assert.equal(unconfigured.headers['set-cookie'], undefined, 'sin secreto jamás se emite sesión')
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       restore()

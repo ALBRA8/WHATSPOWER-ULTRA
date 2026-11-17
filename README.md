@@ -87,6 +87,15 @@ HttpOnly). Es un SSO consciente del dueño: funciona en producción SOLO con el 
 (fail-closed: 404 sin él); el login-demo ANÓNIMO conserva su bloqueo total en producción.
 Pruebas: `tests/ecosystem-login.test.ts`.
 
+### 3.c. Pantalla de acceso real en /studio y errores SSO explicados (2026-11-17)
+El Campaign Studio (`/studio`) ya NO usa `window.prompt` bloqueante (antes dejaba el body
+vacío al cancelar): muestra una PANTALLA DE ACCESO con el secreto clásico, el botón de modo
+demo (si `DEMO_MODE=true` y fuera de producción) y el enlace "Volver al CRM" (`CRM_BASE_URL`).
+Un fallo del canje SSO (403/404/429) responde una página HTML con el motivo (caducado /
+ya usado / no configurado) y el enlace para reintentar desde el CRM. El login-demo anónimo
+del dashboard conserva su bloqueo total en producción. Pruebas: `tests/ecosystem-login.test.ts`
+(cadena canje → cookie → `GET /api/campaigns` 200 incluida).
+
 ### 3.b. Modo claro/oscuro
 El dashboard tiene un toggle de tema en el topbar (botón 🌙/☀️). Un clic cambia entre modo oscuro (por defecto) y modo claro. La preferencia se guarda en `localStorage` y se restaura al recargar.
 
