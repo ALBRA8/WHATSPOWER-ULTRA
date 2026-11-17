@@ -5,6 +5,8 @@ import { unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { Http2ALockChecker, MockLockChecker } from '../src/safety/lock-checker.ts'
 import { LocalSuppressionStore, CompositeSuppressionChecker, FatigueManager } from '../src/safety/suppression.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
@@ -162,6 +164,7 @@ function bootEngine(lockChecker: any, suppressionStore: any) {
   const db = createBroadcastDatabase(':memory:')
   const dispatcher = new MockDispatcher()
   const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
     db,
     dispatcher,
     lockChecker,
@@ -192,6 +195,7 @@ test('U3-06: cancelar la campaña DURANTE los chequeos JIT → el ítem se abort
     templateSpintax: 'Hola {{name}}',
     csvContent: 'phone,name\n3001112233,Uno',
   })
+  seedConsentForCampaign(db, engine.consentStore, 'org_a', campaign.id)
 
   const execPromise = engine.processNextItem(campaign.id, BUSINESS_DATE)
   // Esperar a que el worker esté DENTRO del chequeo JIT #2 y cancelar entonces
@@ -227,11 +231,13 @@ test('U3-07: PAUSED no despacha; CANCELLED es terminal (resume → rechazado)', 
 
 test('U3-08: campañas de DOS organizaciones con el MISMO teléfono corren en paralelo de forma independiente', async () => {
   const lockChecker = new MockLockChecker()
-  const { engine, dispatcher } = bootEngine(lockChecker, { async isSuppressed() { return false } })
+  const { db, engine, dispatcher } = bootEngine(lockChecker, { async isSuppressed() { return false } })
 
   const csv = 'phone,name\n3009998877,Compartido'
   const campA = await engine.createCampaign({ organizationId: 'org_a', name: 'A', templateSpintax: 'Hola A {{name}}', csvContent: csv })
+  seedConsentForCampaign(db, engine.consentStore, 'org_a', campA.id)
   const campB = await engine.createCampaign({ organizationId: 'org_b', name: 'B', templateSpintax: 'Hola B {{name}}', csvContent: csv })
+  seedConsentForCampaign(db, engine.consentStore, 'org_b', campB.id)
 
   // Despachos independientes para campañas de orgs distintas
   const ra = await engine.processNextItem(campA.id, BUSINESS_DATE)

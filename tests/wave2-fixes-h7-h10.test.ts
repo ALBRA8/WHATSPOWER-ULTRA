@@ -21,6 +21,8 @@ import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { PersistentBroadcastWorker } from '../src/queue/persistent-worker.ts'
 import { Throttler } from '../src/queue/throttler.ts'
@@ -33,6 +35,7 @@ const CSV_1 = 'phone,name\n573000002101,Solo\n'
 
 function makeEngine(db: import('node:sqlite').DatabaseSync, dispatcher: any, opts?: { durablePacing?: boolean; throttler?: Partial<import('../src/queue/throttler.ts').ThrottlerOptions>; nowMs?: () => number; claimLeaseRenewIntervalMs?: number }): BroadcastEngine {
   return new BroadcastEngine({
+    consentStore: new ConsentStore(db),
     db,
     dispatcher,
     lockChecker: new StandaloneLockChecker(),
@@ -45,6 +48,7 @@ function makeEngine(db: import('node:sqlite').DatabaseSync, dispatcher: any, opt
 
 async function startCampaignAsync(engine: BroadcastEngine, organizationId: string, name: string, csv: string): Promise<string> {
   const c = await engine.createCampaign({ organizationId, name, templateSpintax: 'Hola {{nombre}}', csvContent: csv })
+  seedConsentForCampaign(engine.db, engine.consentStore, organizationId, c.id)
   const res = transitionCampaignStatus(engine.db, c.id, null, 'RUNNING')
   assert.ok(res.ok, `la campaña ${name} debe poder pasar a RUNNING (desde ${c.status})`)
   return c.id
@@ -135,6 +139,7 @@ describe('H8 — finalización tardía de un despacho: SIN doble contabilizació
     const engineB = makeEngine(db, { dispatch: async () => OK_DISPATCH })
     // Un lockChecker que reconcilia el claim externamente y luego reporta lock:
     const engineC = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: { dispatch: async () => OK_DISPATCH },
       lockChecker: {

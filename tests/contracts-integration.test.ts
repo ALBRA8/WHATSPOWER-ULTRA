@@ -1,6 +1,8 @@
 import assert from 'node:assert'
 import { createServer, type Server } from 'node:http'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { HttpCrmDaemonDispatcher } from '../src/adapters/dispatcher.ts'
 import { Http2ALockChecker } from '../src/safety/lock-checker.ts'
 import { Http2ASuppressionChecker, CompositeSuppressionChecker, LocalSuppressionStore } from '../src/safety/suppression.ts'
@@ -315,6 +317,7 @@ async function runContractsIntegrationSuite() {
     }
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: safeDispatcher,
       lockChecker: dynamicLockChecker,
@@ -374,6 +377,7 @@ async function runContractsIntegrationSuite() {
     }
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: uncertainDispatcher,
       lockChecker,
@@ -388,6 +392,8 @@ async function runContractsIntegrationSuite() {
       templateSpintax: 'Mensaje {{name}}',
       csvContent: csvData,
     })
+
+    seedConsentForCampaign(db, engine.consentStore, 'org_test', campaign.id)
 
     const businessDate = new Date('2026-10-24T11:00:00-05:00')
     const stepRes = await engine.processNextItem(campaign.id, businessDate)

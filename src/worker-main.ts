@@ -32,6 +32,7 @@ import { HttpCrmDaemonDispatcher } from './adapters/dispatcher.ts'
 import { MetaCloudDispatcher } from './adapters/meta-cloud-dispatcher.ts'
 import { Http2ALockChecker, StandaloneLockChecker } from './safety/lock-checker.ts'
 import { LocalSuppressionStore, Http2ASuppressionChecker, CompositeSuppressionChecker } from './safety/suppression.ts'
+import { ConsentStore } from './safety/consent-store.ts'
 import { productionConfigProblems } from './security.ts'
 
 // Carga el .env del repo si existe (mismo patrón que Capa 2A/3).
@@ -56,6 +57,11 @@ if (process.env.ALLOW_REAL_DISPATCH !== 'true') {
 
 const db = createBroadcastDatabase(process.env.BROADCAST_DB_PATH)
 
+// (reparación 2026-11-17) ConsentStore OBLIGATORIO en el worker: sin registro de
+// consentimiento (Ley 1581) el engine ni siquiera se construye y las bajas
+// procesadas aquí revocan el consentimiento en el store.
+const consentStore = new ConsentStore(db)
+
 const whatsPowerEnabled = process.env.WHATSPOWER_ENABLED !== 'false'
 const useMetaCloud = process.env.TRANSPORT_ENGINE === 'meta_cloud'
 const dispatcher = useMetaCloud
@@ -67,8 +73,9 @@ const engine = new BroadcastEngine({
   dispatcher,
   lockChecker: whatsPowerEnabled ? new Http2ALockChecker({ enabled: true }) : new StandaloneLockChecker(),
   suppressionStore: whatsPowerEnabled
-    ? new CompositeSuppressionChecker(new LocalSuppressionStore(db), new Http2ASuppressionChecker())
-    : new LocalSuppressionStore(db),
+    ? new CompositeSuppressionChecker(new LocalSuppressionStore(db, consentStore), new Http2ASuppressionChecker())
+    : new LocalSuppressionStore(db, consentStore),
+  consentStore,
   // (hallazgo 9) pacing DURABLE por organización activo en el worker de
   // producción (WORKER_DISABLE_PACING=1 lo desactiva SOLO para laboratorio).
   durablePacing: process.env.WORKER_DISABLE_PACING !== '1',

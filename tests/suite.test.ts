@@ -1,5 +1,6 @@
 import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
 import { parseAudienceCsv, canonicalizePhone } from '../src/audiences/csv-importer.ts'
 import { renderSpintax } from '../src/engine/spintax.ts'
 import { MockLockChecker } from '../src/safety/lock-checker.ts'
@@ -8,6 +9,7 @@ import { MockDispatcher } from '../src/adapters/dispatcher.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { Throttler } from '../src/queue/throttler.ts'
 import { transitionCampaignStatus } from '../src/queue/campaign-lifecycle.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 
 async function runBroadcastTestSuite() {
   console.log('\n============================================================')
@@ -51,6 +53,7 @@ invalido,Error,Cali
     mockLock.setLock('573001112233', 'IN_FLOW_2A', 'org_test_1')
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLock,
@@ -85,6 +88,7 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLock,
@@ -108,6 +112,7 @@ invalido,Error,Cali
 
     // El worker intenta procesar el ítem
     const businessDate = new Date('2026-10-24T10:00:00-05:00') // 10:00 AM hora Bogotá
+    seedConsentForCampaign(db, engine.consentStore, 'org_test_1', campaign.id)
     const stepRes = await engine.processNextItem(campaign.id, businessDate)
 
     assert.strictEqual(stepRes.status, 'ABORTED_LOCK_ACTIVE')
@@ -126,6 +131,7 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLock,
@@ -144,6 +150,7 @@ invalido,Error,Cali
     mockLock.simulateTimeout = true
 
     const businessDate = new Date('2026-10-24T10:00:00-05:00')
+    seedConsentForCampaign(db, engine.consentStore, 'org_test_1', campaign.id)
     const stepRes = await engine.processNextItem(campaign.id, businessDate)
 
     assert.strictEqual(stepRes.status, 'SKIPPED_LOCK_UNAVAILABLE')
@@ -166,6 +173,7 @@ invalido,Error,Cali
     suppressionStore.addSuppression('org_test_1', '573001112233', 'Usuario solicitó BAJA')
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLock,
@@ -252,6 +260,7 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLock,
@@ -275,6 +284,7 @@ invalido,Error,Cali
 
     // Simular las 22:00 (10:00 PM hora Bogotá)
     const nightDate = new Date('2026-10-24T22:00:00-05:00')
+    seedConsentForCampaign(db, engine.consentStore, 'org_test_1', campaign.id)
     const stepRes = await engine.processNextItem(campaign.id, nightDate)
 
     assert.strictEqual(stepRes.status, 'PAUSED_OFF_HOURS')
@@ -293,6 +303,7 @@ invalido,Error,Cali
     const mockDispatcher = new MockDispatcher()
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLock,

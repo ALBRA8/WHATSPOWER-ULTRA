@@ -1,5 +1,6 @@
 import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { HttpCrmDaemonDispatcher } from '../src/adapters/dispatcher.ts'
 import { createBroadcastServer } from '../src/server.ts'
@@ -139,6 +140,7 @@ async function runPilotSafeguardsSuite() {
       async dispatch() { this.calls++; return { success: true } },
     }
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher as any,
       lockChecker: { async checkLock(_p: string, _o: string) { return { available: true } } },
@@ -172,6 +174,7 @@ async function runPilotSafeguardsSuite() {
     }
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher as any,
       lockChecker: { async checkLock(_p: string, _o: string) { return { available: true } } },

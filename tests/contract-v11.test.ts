@@ -20,6 +20,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { createHmac } from 'node:crypto'
 import { createBroadcastServer } from '../src/server.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { MockDispatcher } from '../src/adapters/dispatcher.ts'
 import { StandaloneLockChecker } from '../src/safety/lock-checker.ts'
 import { LocalSuppressionStore } from '../src/safety/suppression.ts'
@@ -213,6 +215,7 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
     const db = createBroadcastDatabaseForTest()
     const mockDispatcher = new MockDispatcher()
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: new StandaloneLockChecker(),
@@ -238,6 +241,7 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
         const auth = { 'Authorization': 'Bearer ultra_contract_admin_key_min32chars_01', 'Content-Type': 'application/json' }
         const created = await fetch(`${base}/api/campaigns`, { method: 'POST', headers: auth, body: JSON.stringify({ name: 'ST-01', templateSpintax: 'Hola', csvContent: 'phone,name\n573000000111,Uno' }) })
         const campaign = await created.json() as any
+        seedConsentForCampaign(db, engine.consentStore, 'org_st', campaign.id)
 
         // DRAFT → /step despacha (transición legal DRAFT→RUNNING). Se usa el engine directo
         // con fecha hábil determinista (el reloj real puede estar fuera del horario comercial,
@@ -272,6 +276,7 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
   it('ST-02: claim atómico — dos pasos concurrentes sobre el mismo ítem despachan UNA vez', async () => {
     const { db, engine, mockDispatcher } = bootEngine()
     const campaign = await engine.createCampaign({ organizationId: ORG_X, name: 'Atomic', templateSpintax: 'Hola', csvContent: 'phone,name\n573000000222,Dos' })
+    seedConsentForCampaign(db, engine.consentStore, ORG_X, campaign.id)
     // Un solo ítem PENDING: dos processNextItem simultáneos → exactamente 1 despacho real
     const [r1, r2] = await Promise.all([
       engine.processNextItem(campaign.id, new Date('2026-11-06T13:00:00Z')),
@@ -285,6 +290,7 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
   it('ST-03: reconciliación — FAILED_RETRYABLE reintenta máx 3 y luego FAILED; UNCERTAIN jamás reintenta', async () => {
     const { db, engine, mockDispatcher } = bootEngine()
     const campaign = await engine.createCampaign({ organizationId: ORG_X, name: 'Retry', templateSpintax: 'Hola', csvContent: 'phone,name\n573000000333,Tres' })
+    seedConsentForCampaign(db, engine.consentStore, ORG_X, campaign.id)
     mockDispatcher.shouldFail = true
     const businessDate = new Date('2026-11-06T13:00:00Z')
     // Intento 1 → FAILED_RETRYABLE; re-proceso (2) → FAILED_RETRYABLE; (3) → terminal.
@@ -300,6 +306,7 @@ describe('CONTRATO v1.1.0 §5-§6 — motor de despacho y máquina de estados (C
     // UNCERTAIN_DISPATCH jamás se re-encola automáticamente
     mockDispatcher.shouldFail = false
     const campaign2 = await engine.createCampaign({ organizationId: ORG_X, name: 'Uncertain', templateSpintax: 'Hola', csvContent: 'phone,name\n573000000444,Cuatro' })
+    seedConsentForCampaign(db, engine.consentStore, ORG_X, campaign2.id)
     const uncDispatcher: any = engine.dispatcher
     uncDispatcher.shouldFail = false
     const s1 = await engine.processNextItem(campaign2.id, businessDate)

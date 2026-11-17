@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { renderSpintax } from '../src/engine/spintax.ts'
 import { parseAudienceCsv } from '../src/audiences/csv-importer.ts'
@@ -29,7 +31,7 @@ test('SUITE EXHAUSTIVA: WhatsPower-Ultra como Clon 100% WhatsOn & WATI', async (
   const db = createBroadcastDatabase(':memory:')
   const dispatcher = new MockDispatcher()
   const lockChecker = new MockLockChecker()
-  const engine = new BroadcastEngine({ db, dispatcher: dispatcher as any, lockChecker })
+  const engine = new BroadcastEngine({ db, dispatcher: dispatcher as any, lockChecker, consentStore: new ConsentStore(db) })
 
   // -------------------------------------------------------------
   // WO-01: CSV Importer & Deduplicación
@@ -99,6 +101,7 @@ invalido123,Descartado`
   // -------------------------------------------------------------
   await t.test('WO-04: Despacho secuencial del ítem PENDING', async () => {
     const campaign = engine.db.prepare("SELECT id FROM campaigns WHERE name = 'Campaña con Lock'").get() as any
+    seedConsentForCampaign(engine.db, engine.consentStore, 'org_test', campaign.id)
     const step = await engine.processNextItem(campaign.id, new Date('2026-10-26T14:00:00')) // Horario comercial
 
     assert.strictEqual(step.processed, true)

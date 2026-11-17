@@ -11,6 +11,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import type { DatabaseSync } from 'node:sqlite'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { StandaloneLockChecker } from '../src/safety/lock-checker.ts'
 import { transitionCampaignStatus } from '../src/queue/campaign-lifecycle.ts'
@@ -23,7 +25,7 @@ import {
 import { WebhookLeadIngester } from '../src/audiences/webhook-ingest.ts'
 
 function makeEngine(db: DatabaseSync, dispatcher: any): BroadcastEngine {
-  return new BroadcastEngine({ db, dispatcher, lockChecker: new StandaloneLockChecker() })
+  return new BroadcastEngine({ db, dispatcher, lockChecker: new StandaloneLockChecker(), consentStore: new ConsentStore(db) })
 }
 
 const CSV = 'phone,name\n573000001122,<img src=x onerror=alert(1)>\n'
@@ -39,6 +41,7 @@ async function seededCampaign(): Promise<{ db: DatabaseSync; engine: BroadcastEn
   })
   await engine.createCampaign({ organizationId: 'org_test', name: 'LC', templateSpintax: 'Hola {{nombre}}', csvContent: CSV })
   const campaignId = (db.prepare('SELECT id FROM campaigns LIMIT 1').get() as any).id
+  seedConsentForCampaign(db, engine.consentStore, 'org_test', campaignId)
   return { db, engine, campaignId }
 }
 
@@ -92,6 +95,7 @@ describe('LIFECYCLE: máquina de estados de campañas (§4.B)', () => {
       },
     }
     const slowEngine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: {
         dispatch: async (phone: string) => {
@@ -124,6 +128,7 @@ describe('LIFECYCLE: máquina de estados de campañas (§4.B)', () => {
     let release: () => void
     const gate = new Promise<void>((r) => { release = r })
     const busyEngine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: { dispatch: async () => { await gate; return { success: true } } },
       lockChecker: new StandaloneLockChecker(),

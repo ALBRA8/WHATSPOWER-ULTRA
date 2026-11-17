@@ -61,7 +61,10 @@ export class BroadcastEngine {
   lockChecker: LockChecker
   suppressionStore: SuppressionChecker
   fatigueManager: FatigueManager
-  consentStore?: ConsentStore
+  /** (reparación 2026-11-17) OBLIGATORIO: sin registro de consentimiento (Ley 1581)
+   *  el engine NO se construye (fail-closed al arrancar) y ningún despacho se
+   *  ejecuta sin consentimiento previo vigente (SKIPPED_NO_CONSENT). */
+  consentStore: ConsentStore
   throttler: Throttler
   /** Identidad única de este worker — queda registrada en campaign_items.claimed_by. */
   readonly workerId: string
@@ -76,7 +79,9 @@ export class BroadcastEngine {
     dispatcher: Dispatcher
     lockChecker: LockChecker
     suppressionStore?: SuppressionChecker
-    consentStore?: ConsentStore
+    /** (reparación 2026-11-17) obligatorio — el constructor LANZA si falta
+     *  (fail-closed: no existe modo de operar sin verificación de consentimiento). */
+    consentStore: ConsentStore
     throttlerOptions?: Partial<ThrottlerOptions>
     workerId?: string
     /** (hallazgo 9) activa el pacing durable por organización (default false
@@ -90,6 +95,9 @@ export class BroadcastEngine {
     this.db = options.db
     this.dispatcher = options.dispatcher
     this.lockChecker = options.lockChecker
+    if (!options.consentStore) {
+      throw new Error('CONSENT_STORE_REQUIRED: BroadcastEngine exige un ConsentStore (Ley 1581) — sin registro de consentimiento no se despacha (fail-closed)')
+    }
     this.consentStore = options.consentStore
     this.suppressionStore = options.suppressionStore || new LocalSuppressionStore(this.db, this.consentStore)
     this.fatigueManager = new FatigueManager(this.db)
@@ -395,7 +403,10 @@ export class BroadcastEngine {
     }
 
     // D1.5. FASE 2: Comprobación Just-In-Time de Consentimiento Vigente (Ley 1581)
-    if (this.consentStore && !this.consentStore.hasActiveConsent(campaign.organizationId, phone)) {
+    // (reparación 2026-11-17) INCONDICIONAL: el consentStore es obligatorio en el
+    // constructor, así que el chequeo nunca se salta (antes era `if (this.consentStore && …)`
+    // y un engine sin store despachaba sin verificar consentimiento).
+    if (!this.consentStore.hasActiveConsent(campaign.organizationId, phone)) {
       const up = this.db.prepare(`
         UPDATE campaign_items
         SET status = 'SKIPPED_NO_CONSENT', error_reason = 'Contacto sin consentimiento previo vigente (Ley 1581)'

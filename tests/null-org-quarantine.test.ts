@@ -25,12 +25,16 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { DatabaseSync } from 'node:sqlite'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { StandaloneLockChecker } from '../src/safety/lock-checker.ts'
 
 function makeEngine(db: string | DatabaseSync, dispatcher: any, workerId?: string): BroadcastEngine {
+  const resolvedDb = typeof db === 'string' ? createBroadcastDatabase(db) : db
   return new BroadcastEngine({
-    db: typeof db === 'string' ? createBroadcastDatabase(db) : db,
+    consentStore: new ConsentStore(resolvedDb),
+    db: resolvedDb,
     dispatcher,
     lockChecker: new StandaloneLockChecker(),
     workerId,
@@ -196,6 +200,7 @@ describe('B4: ítems de campaña sin organización — cuarentena, nunca despach
       },
     })
     const camp = await engine.createCampaign({ organizationId: 'org_sana', name: 'C', templateSpintax: 'Hola', csvContent: CSV })
+    seedConsentForCampaign(db, engine.consentStore, 'org_sana', camp.id)
     const r = await engine.processNextItem(camp.id, new Date('2026-10-26T14:00:00'))
     assert.equal(r.status, 'SENT', 'el flujo sano no se rompe con el endurecido B4')
     assert.equal(dispatches, 1)

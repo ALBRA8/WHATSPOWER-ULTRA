@@ -1,5 +1,6 @@
 import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { Http2ASuppressionChecker, CompositeSuppressionChecker, LocalSuppressionStore } from '../src/safety/suppression.ts'
 import { resetOrgCredentialCache } from '../src/org-credentials.ts'
@@ -94,6 +95,7 @@ async function runBajasCircuitTest() {
     }
 
     const engine = new BroadcastEngine({
+    consentStore: new ConsentStore(db),
       db,
       dispatcher: mockDispatcher,
       lockChecker: mockLockChecker,

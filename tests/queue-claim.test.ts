@@ -12,12 +12,16 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import type { DatabaseSync } from 'node:sqlite'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { StandaloneLockChecker } from '../src/safety/lock-checker.ts'
 
 function makeEngine(db: string | DatabaseSync, dispatcher: any, workerId?: string): BroadcastEngine {
+  const resolvedDb = typeof db === 'string' ? createBroadcastDatabase(db) : db
   return new BroadcastEngine({
-    db: typeof db === 'string' ? createBroadcastDatabase(db) : db,
+    consentStore: new ConsentStore(resolvedDb),
+    db: resolvedDb,
     dispatcher,
     lockChecker: new StandaloneLockChecker(),
     workerId,
@@ -41,6 +45,7 @@ describe('CLAIM: cola con claim atómico — un ítem, un worker', () => {
       },
     }, 'worker_A')
     await engineA.createCampaign({ organizationId: 'org_test', name: 'C1', templateSpintax: 'Hola', csvContent: CSV })
+    seedConsentForCampaign(engineA.db, engineA.consentStore, 'org_test', (engineA.db.prepare('SELECT id FROM campaigns LIMIT 1').get() as any).id)
 
     // Worker B arranca MIENTRAS A está dentro del dispatch del primer ítem
     const engineB = makeEngine(engineA.db, {

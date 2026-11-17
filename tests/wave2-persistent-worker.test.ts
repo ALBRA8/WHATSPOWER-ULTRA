@@ -21,6 +21,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { createBroadcastDatabase } from '../src/db.ts'
+import { ConsentStore } from '../src/safety/consent-store.ts'
+import { seedConsentForCampaign } from './helpers/consent.ts'
 import { BroadcastEngine } from '../src/queue/broadcast-worker.ts'
 import { PersistentBroadcastWorker } from '../src/queue/persistent-worker.ts'
 import { StandaloneLockChecker } from '../src/safety/lock-checker.ts'
@@ -30,8 +32,10 @@ import { transitionCampaignStatus } from '../src/queue/campaign-lifecycle.ts'
 const BUSINESS_HOUR = new Date('2026-11-09T15:00:00Z')
 
 function makeEngine(dbPath: string | import('node:sqlite').DatabaseSync, dispatcher: any): BroadcastEngine {
+  const resolvedDb = typeof dbPath === 'string' ? createBroadcastDatabase(dbPath) : dbPath
   return new BroadcastEngine({
-    db: typeof dbPath === 'string' ? createBroadcastDatabase(dbPath) : dbPath,
+    consentStore: new ConsentStore(resolvedDb),
+    db: resolvedDb,
     dispatcher,
     lockChecker: new StandaloneLockChecker(),
   })
@@ -39,6 +43,7 @@ function makeEngine(dbPath: string | import('node:sqlite').DatabaseSync, dispatc
 
 async function startCampaignAsync(engine: BroadcastEngine, organizationId: string, name: string, csv: string): Promise<string> {
   const c = await engine.createCampaign({ organizationId, name, templateSpintax: 'Hola {{nombre}}', csvContent: csv })
+  seedConsentForCampaign(engine.db, engine.consentStore, organizationId, c.id)
   const res = transitionCampaignStatus(engine.db, c.id, null, 'RUNNING')
   assert.ok(res.ok, `la campaña ${name} debe poder pasar a RUNNING (desde ${c.status})`)
   return c.id
