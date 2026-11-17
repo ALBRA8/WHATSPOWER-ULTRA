@@ -38,28 +38,38 @@ export class LocalSuppressionStore implements SuppressionChecker {
     this.consentStore = consentStore
   }
 
+  /** (reparación 2026-11-17) Normalización canónica: una baja registrada como
+   *  +573000000000 y el contacto importado como 573000000000 SON EL MISMO
+   *  teléfono — sin normalizar, el JIT anti-baja comparaba formatos distintos
+   *  y la baja no bloqueaba el despacho. */
+  private static normPhone(phone: string): string {
+    return String(phone || '').replace(/\D/g, '')
+  }
+
   async isSuppressed(phone: string, organizationId: string): Promise<boolean> {
     if (!organizationId) {
       // Fail-closed: sin organización no hay respuesta válida
       throw new Error('TENANT_CONTEXT_INVALID: isSuppressed exige organizationId')
     }
-    const orgRow = this.db.prepare('SELECT phone FROM suppression_list WHERE organization_id = ? AND phone = ?').get(organizationId, phone)
+    const normalized = LocalSuppressionStore.normPhone(phone)
+    const orgRow = this.db.prepare('SELECT phone FROM suppression_list WHERE organization_id = ? AND phone = ?').get(organizationId, normalized)
     if (orgRow) return true
     // Lista global restringida (requisitos legales documentados)
-    const globalRow = this.db.prepare('SELECT phone FROM global_suppression_list WHERE phone = ?').get(phone)
+    const globalRow = this.db.prepare('SELECT phone FROM global_suppression_list WHERE phone = ?').get(normalized)
     return Boolean(globalRow)
   }
 
   /** Baja POR ORGANIZACIÓN (5.B — política por defecto). */
   async addSuppression(organizationId: string, phone: string, reason: string = 'opt_out'): Promise<void> {
     if (!organizationId) throw new Error('TENANT_CONTEXT_INVALID: addSuppression exige organizationId')
+    const normalized = LocalSuppressionStore.normPhone(phone)
     this.db.prepare(`
       INSERT INTO suppression_list (organization_id, phone, reason, created_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(organization_id, phone) DO UPDATE SET
         reason = excluded.reason,
         created_at = excluded.created_at
-    `).run(organizationId, phone, reason, Math.floor(Date.now() / 1000))
+    `).run(organizationId, normalized, reason, Math.floor(Date.now() / 1000))
 
     if (this.consentStore) {
       try {
@@ -79,13 +89,13 @@ export class LocalSuppressionStore implements SuppressionChecker {
       INSERT INTO global_suppression_list (phone, reason, created_at)
       VALUES (?, ?, ?)
       ON CONFLICT(phone) DO UPDATE SET reason = excluded.reason
-    `).run(phone, reason, Math.floor(Date.now() / 1000))
+    `).run(LocalSuppressionStore.normPhone(phone), reason, Math.floor(Date.now() / 1000))
   }
 
   /** Re-activa a un contacto SOLO para la organización que lo pide (la global NO se toca aquí). */
   async removeSuppression(organizationId: string, phone: string): Promise<void> {
     if (!organizationId) throw new Error('TENANT_CONTEXT_INVALID: removeSuppression exige organizationId')
-    this.db.prepare('DELETE FROM suppression_list WHERE organization_id = ? AND phone = ?').run(organizationId, phone)
+    this.db.prepare('DELETE FROM suppression_list WHERE organization_id = ? AND phone = ?').run(organizationId, LocalSuppressionStore.normPhone(phone))
   }
 
   /** Listado por organización (jamás cruza organizaciones). */
