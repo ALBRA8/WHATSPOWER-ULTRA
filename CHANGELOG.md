@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 2026-11-17 — Acceso directo al ecosistema (SSO de un solo uso)
+
+- **`feat(studio)` (9c00ad2)**: `GET /studio/login-ecosystem` canjea enlaces SSO emitidos por el
+  CRM (capa 1) para abrir el dashboard de paridad con sesión de operador sin repetir credenciales:
+  - Token `v1.<payload>.<hmac>` — HMAC-SHA256 con `ECOSYSTEM_SSO_SECRET` compartido, TTL 90 s,
+    `jti` de UN SOLO USO (registro en memoria con purga perezosa), verificación timing-safe,
+    IP del socket para el throttle (TRUST_PROXY respetado).
+  - Concesión: 302 a `/` con cookie HttpOnly (primera identidad de `ADMIN_API_KEYS`).
+  - SSO CONSCIENTE del dueño: funciona en producción SOLO con el secreto configurado; el
+    login-demo ANÓNIMO conserva su bloqueo total en producción (403, regla H-2 intacta).
+  - Fail-closed: sin secreto la ruta NO existe (404); sin `ADMIN_API_KEYS` 503.
+  - Pruebas: `tests/ecosystem-login.test.ts` (9 aserciones). Suite: **278/278**.
+  - Docs: README §3.b, `.env.example` (`ECOSYSTEM_SSO_SECRET`).
+
+
 ## 2026-11-17 — Reparación de producción real (FASE 1-5 del encargo maestro)
 
 ### Seguridad — Consentimiento (Ley 1581)
