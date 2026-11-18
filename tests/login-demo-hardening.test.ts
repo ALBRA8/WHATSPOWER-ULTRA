@@ -32,6 +32,18 @@ function post(port: number, path: string, headers: Record<string, string> = {}, 
   })
 }
 
+function get(port: number, path: string): Promise<{ status: number | undefined; headers: any; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request(`http://127.0.0.1:${port}${path}`, { method: 'GET' }, (res) => {
+      let data = ''
+      res.on('data', (c) => (data += c))
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 test('FASE 1.B — endurecimiento de login-demo y rate limiter', async (t) => {
   await t.test('1.B.1 productionConfigProblems rechaza DEMO_MODE=true en producción', () => {
     const problems = productionConfigProblems({ NODE_ENV: 'production', DEMO_MODE: 'true' } as NodeJS.ProcessEnv)
@@ -129,6 +141,43 @@ test('FASE 1.B — endurecimiento de login-demo y rate limiter', async (t) => {
       }
     } finally {
       if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv
+    }
+  })
+
+  await t.test('1.B.6 /login ofrece el botón demo SOLO cuando el backend lo concedería (DEMO_MODE=true fuera de producción)', async () => {
+    const prevEnv = process.env.NODE_ENV
+    const prevDemo = process.env.DEMO_MODE
+    try {
+      const { server } = createBroadcastServer({ dbPath: ':memory:', whatsPowerEnabled: false })
+      await new Promise<void>((resolve) => server.listen(0, resolve))
+      const port = (server.address() as any).port
+      try {
+        // (a) DEMO_MODE=true en desarrollo → el botón demo se ofrece
+        delete process.env.NODE_ENV
+        process.env.DEMO_MODE = 'true'
+        const on = await get(port, '/login')
+        assert.equal(on.status, 200)
+        assert.ok(on.body.includes('demoBtn'), 'con DEMO_MODE=true (dev) la UI ofrece el botón demo')
+        assert.ok(on.body.includes('loginDemo'), 'el handler del demo acompaña al botón')
+        // (b) DEMO_MODE apagado → la UI NO ofrece la entrada que el backend rechazaría con 403
+        delete process.env.DEMO_MODE
+        const off = await get(port, '/login')
+        assert.equal(off.status, 200)
+        assert.ok(!off.body.includes('demoBtn'), 'sin DEMO_MODE la UI NO muestra el botón demo')
+        assert.ok(!off.body.includes('loginDemo'), 'sin DEMO_MODE no viaja el handler del demo')
+        assert.ok(off.body.includes('loginForm'), 'el login clásico sigue presente')
+        // (c) producción aunque DEMO_MODE=true → sin botón (el backend daría 403 SIEMPRE)
+        process.env.NODE_ENV = 'production'
+        process.env.DEMO_MODE = 'true'
+        const prod = await get(port, '/login')
+        assert.equal(prod.status, 200)
+        assert.ok(!prod.body.includes('demoBtn'), 'en producción la UI jamás ofrece el botón demo')
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      }
+    } finally {
+      if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv
+      if (prevDemo === undefined) delete process.env.DEMO_MODE; else process.env.DEMO_MODE = prevDemo
     }
   })
 })

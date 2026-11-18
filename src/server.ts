@@ -433,7 +433,10 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     // El studio legado queda intacto en /studio (mismo HTML y comportamiento de antes).
     if (req.method === 'GET' && url.pathname === '/login') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-      res.end(renderDashboardLoginHtml())
+      // Misma regla que /studio/login-demo: el botón demo solo se ofrece cuando
+      // el backend lo concedería (DEMO_MODE=true y fuera de producción).
+      const demoEnabled = process.env.NODE_ENV !== 'production' && String(process.env.DEMO_MODE || '').toLowerCase() === 'true'
+      res.end(renderDashboardLoginHtml({ demoEnabled }))
       return
     }
     if (req.method === 'POST' && url.pathname === '/logout') {

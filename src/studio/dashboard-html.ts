@@ -15,7 +15,11 @@
  *  - Sesión: cookie HttpOnly del canje /studio/login; todo 401 → /login.
  */
 
-export function renderDashboardLoginHtml(): string {
+export function renderDashboardLoginHtml(opts?: { demoEnabled?: boolean }): string {
+  // El botón demo SOLO se ofrece cuando el backend lo permite (DEMO_MODE=true
+  // fuera de producción): la UI no debe ofrecer una entrada que el servidor
+  // rechazaría con 403. El llamador calcula la bandera server-side.
+  const demoEnabled = opts?.demoEnabled === true
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -77,10 +81,10 @@ export function renderDashboardLoginHtml(): string {
       <input type="password" id="secret" name="secret" autocomplete="current-password" placeholder="Clave ADMIN_API_KEYS de tu organización" required>
       <button class="btn" id="loginBtn" type="submit">Entrar</button>
     </form>
-    <button class="btn-demo" id="demoBtn" type="button" onclick="loginDemo()">🚀 Entrar sin registro (demo)</button>
+    ${demoEnabled ? '<button class="btn-demo" id="demoBtn" type="button" onclick="loginDemo()">🚀 Entrar sin registro (demo)</button>' : ''}
     <div class="msg" id="msg"></div>
     <div class="hint">El secreto se canjea <b>una vez</b> por una sesión HttpOnly de 1 hora; jamás se guarda en el navegador. Tras 10 intentos fallidos por minuto el acceso se bloquea temporalmente.</div>
-    <div class="demo-hint" id="demoHint">El modo demo usa una sesión temporal con la primera organización configurada. Desactívalo en producción (<code>DEMO_MODE=false</code>).</div>
+    ${demoEnabled ? '<div class="demo-hint" id="demoHint">El modo demo usa una sesión temporal con la primera organización configurada. Desactívalo en producción (<code>DEMO_MODE=false</code>).</div>' : ''}
   </div>
   <script>
     function toggleTheme() {
@@ -102,7 +106,8 @@ export function renderDashboardLoginHtml(): string {
         }
       } catch (e) {}
     })();
-    // === Login demo (sin registro) ===
+    // === Login demo (sin registro) — solo con demoEnabled (botón presente) ===
+    ${demoEnabled ? `
     function loginDemo() {
       var btn = document.getElementById('demoBtn');
       var msg = document.getElementById('msg');
@@ -126,6 +131,7 @@ export function renderDashboardLoginHtml(): string {
     }
     // Mostrar la pista demo al cargar (informativo)
     (function () { var h = document.getElementById('demoHint'); if (h) h.classList.add('visible'); })();
+    ` : ''}
     var params = new URLSearchParams(location.search);
     if (params.get('expired') === '1') {
       var m = document.getElementById('msg');
