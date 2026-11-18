@@ -116,6 +116,12 @@ Smoke contra servicios vivos (modo simulación, 0 envíos reales, limpieza propi
 node scripts/smoke-live.mjs
 ```
 
+**E2E del ecosistema completo (autocontenido y multiplataforma):**
+```bash
+npm run e2e:3
+```
+Levanta CRM + WHATSPOWER + ULTRA con bases de datos temporales y secretos efímeros, ejecuta el flujo completo (webhook firmado → puente → flujo → cliente en CRM; lock; consentimiento; campaña con lock / sin consentimiento / salvaguarda) y verifica SENT=0 (`ALLOW_REAL_DISPATCH=false`). Limpieza automática al terminar. Los repos hermanos se autodescubren por `package.json` (o usa `E2E_CRM_DIR` / `E2E_WP_DIR`).
+
 ### 5. Escaneo de secretos
 ```bash
 npm run security:scan

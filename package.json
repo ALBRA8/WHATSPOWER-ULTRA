@@ -12,6 +12,7 @@
     "worker": "node --experimental-strip-types src/worker-main.ts",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "node scripts/run-tests.mjs",
+    "e2e:3": "node scripts/e2e-3-servicios.mjs",
     "security:scan": "node scripts/scan-secrets.mjs",
     "tsc": "tsc --noEmit -p tsconfig.json",
     "build": "node scripts/build-site.mjs",

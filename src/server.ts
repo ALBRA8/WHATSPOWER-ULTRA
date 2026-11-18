@@ -1019,7 +1019,11 @@ if (process.argv[1]?.includes('server.ts')) {
   // Por defecto solo localhost (la API de despacho no se expone a la red);
   // usa HOST=0.0.0.0 explícitamente si la topología lo exige.
   const HOST = process.env.HOST || '127.0.0.1'
-  const { server } = createBroadcastServer()
+  const { server } = createBroadcastServer({
+    // Rutas de BD configurables por entorno (E2E autocontenido con bases temporales)
+    dbPath: process.env.ULTRA_DB_PATH || undefined,
+    replayDbPath: process.env.ULTRA_REPLAY_DB_PATH || undefined,
+  })
   server.listen(PORT, HOST, () => {
     console.log(`[Capa 2B] Servidor de Broadcast escuchando en http://${HOST}:${PORT}`)
   })
