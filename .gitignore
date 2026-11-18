@@ -27,3 +27,6 @@ scripts/_*
 scripts/cleanup*.mjs
 scripts/limpiar*.mjs
 PROMPT FINALIZAR.txt
+
+# Lista local de PII prohibida (NUNCA se compromete; ver scripts/check-pii.mjs)
+scripts/pii-denylist.local.*
