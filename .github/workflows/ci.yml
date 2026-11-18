@@ -17,6 +17,8 @@ jobs:
         run: npm install && npx tsc --noEmit -p tsconfig.json
       - name: Escáner de secretos
         run: npm run security:scan
+      - name: Escáner de PII y teléfonos reales
+        run: npm run check:pii
       - name: Suite completa (incluye seguridad AUTH/ORG/OWN/WH/TR/ENV)
         run: npm test
         env:

@@ -60,8 +60,8 @@ function bootServer(): { server: ReturnType<typeof createBroadcastServer>['serve
   const prevDemo = process.env.DEMO_MODE
   const prevEnv = process.env.NODE_ENV
   process.env.ADMIN_API_KEYS = 'ultra_demo_admin_key_min32chars_01:org_demo'
-  delete process.env.DEMO_MODE
-  delete process.env.NODE_ENV // no producción por defecto
+  if (process.env.DEMO_MODE === undefined) process.env.DEMO_MODE = 'true'
+  if (process.env.NODE_ENV === undefined) process.env.NODE_ENV = 'development'
   const { server } = createBroadcastServer({ dbPath: ':memory:', whatsPowerEnabled: false })
   return {
     server,
@@ -80,6 +80,14 @@ async function listenEphemeral(server: Server): Promise<number> {
 }
 
 test('ECOSISTEMA — /studio/login-ecosystem (canje SSO de un solo uso)', async (t) => {
+  const prevDemoSuite = process.env.DEMO_MODE
+  const prevNodeEnvSuite = process.env.NODE_ENV
+  process.env.DEMO_MODE = 'true'
+  process.env.NODE_ENV = 'development'
+  t.after(() => {
+    if (prevDemoSuite === undefined) delete process.env.DEMO_MODE; else process.env.DEMO_MODE = prevDemoSuite
+    if (prevNodeEnvSuite === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevNodeEnvSuite
+  })
   await t.test('1. Fail-closed: sin ECOSYSTEM_SSO_SECRET la ruta NO existe (404)', async () => {
     const { server, restore } = bootServer()
     delete process.env.ECOSYSTEM_SSO_SECRET
@@ -176,7 +184,7 @@ test('ECOSISTEMA — /studio/login-ecosystem (canje SSO de un solo uso)', async 
     }
   })
 
-  await t.test('7. SSO consciente: en producción SÍ canjea con el secreto configurado (a diferencia del login-demo anónimo)', async () => {
+  await t.test('7. En producción responde 403 (el SSO directo está estrictamente restringido a demo/desarrollo)', async () => {
     const { server, restore } = bootServer()
     process.env.ECOSYSTEM_SSO_SECRET = SSO_SECRET
     process.env.NODE_ENV = 'production'
@@ -184,27 +192,28 @@ test('ECOSISTEMA — /studio/login-ecosystem (canje SSO de un solo uso)', async 
     try {
       const token = signEcosystemToken(SSO_SECRET)
       const sso = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(token)}`)
-      assert.equal(sso.status, 302, 'el SSO firmado y de un solo uso es el mecanismo consciente del dueño')
+      assert.equal(sso.status, 403, 'en producción el SSO directo está prohibido y responde 403')
+      assert.equal(sso.headers['set-cookie'], undefined, 'jamás emite sesión en producción')
       const demo = await get(port, '/studio/login-demo')
-      // login-demo anónimo es POST; con GET el fallback responde 404 — lo que
-      // importa aquí es que NO emita cookie en NINGÚN caso sin POST válido.
       assert.equal(demo.headers['set-cookie'], undefined, 'el demo anónimo no emite sesión')
     } finally {
+      process.env.NODE_ENV = 'development'
       await new Promise<void>((resolve) => server.close(() => resolve()))
       restore()
     }
   })
 
-  await t.test('8. En producción SIN secreto → 404 (fail-closed idéntico)', async () => {
+  await t.test('8. En producción responde 403 aun sin secreto (prioridad de guardia de entorno)', async () => {
     const { server, restore } = bootServer()
     delete process.env.ECOSYSTEM_SSO_SECRET
     process.env.NODE_ENV = 'production'
     const port = await listenEphemeral(server)
     try {
       const res = await get(port, '/studio/login-ecosystem?token=x')
-      assert.equal(res.status, 404)
+      assert.equal(res.status, 403, 'la guardia de producción evalúa primero y bloquea con 403')
       assert.equal(res.headers['set-cookie'], undefined)
     } finally {
+      process.env.NODE_ENV = 'development'
       await new Promise<void>((resolve) => server.close(() => resolve()))
       restore()
     }
@@ -260,6 +269,60 @@ test('ECOSISTEMA — /studio/login-ecosystem (canje SSO de un solo uso)', async 
       assert.ok(String(unconfigured.headers['content-type']).includes('text/html'))
       assert.ok(unconfigured.body.includes('no configurado'), 'el fail-closed se explica, no se oculta')
       assert.equal(unconfigured.headers['set-cookie'], undefined, 'sin secreto jamás se emite sesión')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      restore()
+    }
+  })
+
+  await t.test('11. GET /studio/login-ecosystem: prohibido en producción (403)', async () => {
+    const { server, restore } = bootServer()
+    process.env.ECOSYSTEM_SSO_SECRET = SSO_SECRET
+    process.env.NODE_ENV = 'production'
+    process.env.DEMO_MODE = 'true'
+    const port = await listenEphemeral(server)
+    try {
+      const token = signEcosystemToken(SSO_SECRET)
+      const res = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(token)}`)
+      assert.equal(res.status, 403, 'en producción responde 403 Forbidden')
+      assert.equal(res.headers['set-cookie'], undefined, 'jamás emite sesión en producción')
+      assert.ok(res.body.includes('Acceso Prohibido en Producción') || res.body.includes('403'))
+    } finally {
+      process.env.NODE_ENV = 'development'
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      restore()
+    }
+  })
+
+  await t.test('12. GET /studio/login-ecosystem: rechazado con DEMO_MODE apagado (403)', async () => {
+    const { server, restore } = bootServer()
+    process.env.ECOSYSTEM_SSO_SECRET = SSO_SECRET
+    process.env.NODE_ENV = 'development'
+    delete process.env.DEMO_MODE
+    const port = await listenEphemeral(server)
+    try {
+      const token = signEcosystemToken(SSO_SECRET)
+      const res = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(token)}`)
+      assert.equal(res.status, 403, 'sin DEMO_MODE responde 403')
+      assert.equal(res.headers['set-cookie'], undefined)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      restore()
+    }
+  })
+
+  await t.test('13. Token de una organización rechazado para otra organización (403)', async () => {
+    const { server, restore } = bootServer()
+    process.env.ECOSYSTEM_SSO_SECRET = SSO_SECRET
+    process.env.DEMO_MODE = 'true'
+    const port = await listenEphemeral(server)
+    try {
+      // Token emitido para org_A
+      const tokenA = signEcosystemToken(SSO_SECRET, Date.now(), 90_000, { orgId: 'org_A' })
+      // Se intenta canjear solicitando org_B
+      const res = await get(port, `/studio/login-ecosystem?token=${encodeURIComponent(tokenA)}&orgId=org_B`)
+      assert.equal(res.status, 403, 'token de org_A no sirve en org_B')
+      assert.equal(res.headers['set-cookie'], undefined)
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       restore()

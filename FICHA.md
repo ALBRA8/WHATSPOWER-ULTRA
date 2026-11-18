@@ -80,7 +80,7 @@ Capa 2B delega el despacho exclusivamente en el CRM:
     ```json
     {
       "to": "573001112233",
-      "text": "Hola Johan, te compartimos nuestra actualización comercial..."
+      "text": "Hola Cliente, te compartimos nuestra actualización comercial..."
     }
     ```
   - **Respuesta Esperada:** `200 OK` `{ "success": true, "messageId": "..." }`

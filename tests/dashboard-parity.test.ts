@@ -200,15 +200,15 @@ describe('DASHBOARD PARIDAD — contactos', () => {
     const h = await startDashboardServer()
     try {
       await h.login()
-      const csv = 'phone,name\n3017543786,Johan Bravo\n573017543786,Johan Duplicado\n3001234567,Carlos Perez\ninvalido123,Descartado'
+      const csv = 'phone,name\n3000000001,Contacto Demo\n573000000001,Contacto Duplicado\n3001234567,Carlos Perez\ninvalido123,Descartado'
       const first = await api(h, '/api/contacts/import-csv', { method: 'POST', body: { csvContent: csv } })
       assert.equal(first.status, 200)
       assert.equal(first.data.inserted, 2)
       assert.equal(first.data.invalidCount, 1)
       assert.ok(first.data.validCount >= 2)
-      const list = await api(h, '/api/contacts?q=Johan')
+      const list = await api(h, '/api/contacts?q=Contacto')
       assert.equal(list.data.contacts.length, 1)
-      assert.equal(list.data.contacts[0].phone, '573017543786')
+      assert.equal(list.data.contacts[0].phone, '573000000001')
       const second = await api(h, '/api/contacts/import-csv', { method: 'POST', body: { csvContent: csv } })
       assert.equal(second.data.inserted, 0)
       assert.ok(second.data.skippedExisting >= 2)

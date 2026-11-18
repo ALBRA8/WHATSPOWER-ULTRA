@@ -348,6 +348,7 @@ function leadSecretStrengthProblems(name: string, entry: string, weakDefaults: s
       }
     }
   }
+
   return problems
 }
 
@@ -428,6 +429,10 @@ export function productionConfigProblems(env: NodeJS.ProcessEnv = process.env): 
   const disablePacing = String(env.WORKER_DISABLE_PACING || '').trim().toLowerCase()
   if (env.NODE_ENV === 'production' && (disablePacing === '1' || disablePacing === 'true')) {
     problems.push('WORKER_DISABLE_PACING: activo en producción — el pacing anti-baneo es OBLIGATORIO; desactívalo solo para laboratorio')
+  }
+
+  if (env.NODE_ENV === 'production' && env.ECOSYSTEM_SSO_SECRET) {
+    problems.push('ECOSYSTEM_SSO_SECRET: configurado en producción — el acceso directo SSO del ecosistema sin credenciales está prohibido en producción (fail-closed)')
   }
 
   return problems

@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-11-17 — Higiene PII y blindaje de SSO Ecosistema
+
+- **`fix(pii)`**:
+  - **Saneamiento de datos personales en documentación y pruebas**: Reemplazo de números colombianos reales en `docs/WEBHOOK-MENSAJES.md` y `tests/superpowers-level3.test.ts` por fixtures ficticios estándar (`573000000001` y `3000000002` / `573000000002`).
+  - **Saneamiento de nombres en tests y fichas**: Reemplazo de nombre de operador en `tests/dashboard-parity.test.ts` por `Operador Demo` / `Contacto Demo` y en `FICHA.md`.
+  - **Guardián de CI (`scripts/check-pii.mjs`)**: Script de escaneo de PII integrado como comando `npm run check:pii` y agregado al workflow `.github/workflows/ci.yml`.
+- **`security(sso)`**:
+  - Endurecimiento de `/studio/login-ecosystem` en producción: rechazo 403 incondicional cuando `NODE_ENV=production` y `DEMO_MODE=false`.
+  - Validación multi-tenant en el payload del token HMAC y prohibición de secreto en `productionConfigProblems`. Suite: **283/283 PASS** (50 suites).
+
 ## 2026-11-17 — Acceso directo al ecosistema (SSO de un solo uso)
 
 - **`feat(studio)` (9c00ad2)**: `GET /studio/login-ecosystem` canjea enlaces SSO emitidos por el

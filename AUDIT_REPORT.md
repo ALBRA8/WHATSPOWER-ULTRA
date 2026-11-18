@@ -8,7 +8,8 @@
 | Verificación | Resultado |
 |---|---|
 | `tsc --noEmit` | 0 errores |
-| `npm test` (node:test, 50 suites) | **269/269 PASS** |
+| `npm test` (node:test, 50 suites) | **283/283 PASS** |
+| `npm run check:pii` | **0 violaciones** (árbol limpio de PII y números reales) |
 | `npm run test:security` | 2/2 PASS |
 | `npm run security:scan` | 0 secretos en el árbol |
 | Simulación E2E flujo cruzado | **7/7 PASS** (`tests/e2e-cross-flow.test.ts`) |
@@ -24,10 +25,13 @@
 | H-5 | MEDIO | Normalización del teléfono en la lista de supresión: baja `+57…` no coincidía con contacto `573…` (el JIT anti-baja comparaba formatos) | Normalización canónica en `LocalSuppressionStore` (altas, consultas, bajas) (9cbd4d0) | `tests/e2e-cross-flow.test.ts` (7) |
 | H-6 | INFO | Aviso de canal no oficial Baileys ausente en README y UI | Aviso destacado en README + caja de aviso en Integraciones → Transporte (aa81718) | Inspección + suite en verde |
 | H-7 | INFO | Falta decisión documentada de runtime y procedimiento de respaldo | `DOCS/DECISION_SQLITE_TYPES.md`; `backup-db.ts`/`restore-db.ts` probados; RUNBOOK §3.1-§3.2 (b261f5f) | Scripts ejecutados con datos ficticios |
+| H-8 | CRÍTICO | SSO Ecosistema (`/studio/login-ecosystem`) vulnerable a escalada si se expone fuera de desarrollo | Fail-closed: 403 incondicional en producción sin demo mode; token HMAC con TTL 90s, anti-replay jti y validación multi-tenant | `tests/ecosystem-login.test.ts` (14 aserciones PASS) |
+| H-9 | **ALTO** | PII y números reales presentes en documentación y pruebas públicas (`docs/WEBHOOK-MENSAJES.md`, `tests/dashboard-parity.test.ts`, `tests/superpowers-level3.test.ts`, `FICHA.md`) | Reemplazo exhaustivo por datos ficticios (`Operador Demo`, `Contacto Demo`, `573000000001`, `573000000002`); guardián `scripts/check-pii.mjs` y `npm run check:pii` en CI | `npm run check:pii` (0 violaciones) + suite 283/283 PASS |
 
 ### Qué queda pendiente y por qué
+- **Canal Meta Cloud oficial**: Sigue siendo un **pendiente diferido**. Baileys es el canal activo; Meta Cloud requiere cuenta Meta Business verificada, app aprobada y números oficiales (`OWNER_TODO.md` §2). El adaptador por organización ya existe.
+- **Rotación de claves y credenciales externas**: **NO fue verificada directamente**, solo se recomendó su rotación en `OWNER_TODO.md`.
 - **Docker compose build**: sin docker en el entorno de trabajo; Dockerfile/compose presentes y revisados estáticamente → tarea del PC (`OWNER_TODO.md` §4).
-- **Canal Meta Cloud oficial**: requiere cuenta Meta Business verificada, número oficial y plantillas aprobadas por el dueño (`OWNER_TODO.md` §2). El adaptador por organización ya existe; NO se migró Baileys (regla del encargo).
 - **Rotación multi-cuenta automática**: NO implementada (sin código); declarada como pendiente en la matriz de paridad sincerada (`CONTEXTO CRM/PARIDAD_WHATSON_WHATSPOWER_ULTRA.md` en el repo CRM).
 
 ---

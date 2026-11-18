@@ -68,11 +68,11 @@ Si la cabecera falta, está mal formada, o la firma no coincide → **401 Unauth
 ```bash
 curl -X POST http://localhost:3004/api/audiences/webhook-lead \
   -H "Content-Type: application/json" \
-  -H "X-Webhook-Signature: t=1700000000,v1=$(echo -n '1700000000.{"source":"facebook_ads","phone":"573017543786","name":"Lead desde Facebook Ads"}' | openssl dgst -sha256 -hmac "$INTERNAL_API_SECRET" -binary | xxd -p)" \
+  -H "X-Webhook-Signature: t=1700000000,v1=$(echo -n '1700000000.{"source":"facebook_ads","phone":"573000000001","name":"Lead desde Facebook Ads"}' | openssl dgst -sha256 -hmac "$INTERNAL_API_SECRET" -binary | xxd -p)" \
   -H "X-Webhook-Source: facebook_ads" \
   -d '{
     "source": "facebook_ads",
-    "phone": "573017543786",
+    "phone": "573000000001",
     "name": "Lead desde Facebook Ads",
     "email": "lead@ejemplo.com",
     "campaign": "lead_form_black_friday"
@@ -85,7 +85,7 @@ curl -X POST http://localhost:3004/api/audiences/webhook-lead \
 {
   "success": true,
   "leadId": "lead_4dc77633-2c99-4a6d-8cff-1810c56aeea2",
-  "canonicalPhone": "573017543786"
+  "canonicalPhone": "573000000001"
 }
 ```
 
@@ -95,7 +95,7 @@ curl -X POST http://localhost:3004/api/audiences/webhook-lead \
 curl -X POST http://localhost:3004/api/audiences/webhook-lead \
   -H "Content-Type: application/json" \
   -H "X-Webhook-Signature: t=1700000000,v1=firma_invalida" \
-  -d '{"source":"facebook_ads","phone":"573017543786"}'
+  -d '{"source":"facebook_ads","phone":"573000000001"}'
 ```
 
 ```json
@@ -127,7 +127,7 @@ Si se recibe el mismo lead dos veces (misma combinación `source + phone + windo
 {
   "success": true,
   "leadId": "lead_4dc77633-2c99-4a6d-8cff-1810c56aeea2",
-  "canonicalPhone": "573017543786",
+  "canonicalPhone": "573000000001",
   "duplicated": true
 }
 ```

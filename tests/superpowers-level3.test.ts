@@ -21,7 +21,7 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     // 1. Ingesta de lead exitosa con normalización (+57) y vinculación a campaña
     // (reparación integral: la org va LIGADA a la verificación, nunca del body)
     const resValid = leadIngester.ingestLead({
-      phone: '3019876543', // 10 dígitos -> 573019876543
+      phone: '3000000002', // 10 dígitos -> 573000000002
       name: 'Juan Lead Facebook',
       source: 'facebook_ads',
       campaignId: campaign.id,
@@ -29,12 +29,12 @@ describe('SUITE SUPERPODERES NIVEL 3: WHATSPOWER-ULTRA (WhatsOn + WATI + SleekFl
     }, 'org_test')
 
     assert.strictEqual(resValid.success, true)
-    assert.strictEqual(resValid.canonicalPhone, '573019876543')
+    assert.strictEqual(resValid.canonicalPhone, '573000000002')
 
     // Confirmar que se agregó automáticamente a campaign_items
     const items = engine.getItems(campaign.id)
     assert.strictEqual(items.length, 2)
-    const dynamicItem = items.find((i) => i.contactPhone === '573019876543')
+    const dynamicItem = items.find((i) => i.contactPhone === '573000000002')
     assert.ok(dynamicItem)
     assert.strictEqual(dynamicItem?.status, 'PENDING')
     assert.strictEqual(dynamicItem?.contactName, 'Juan Lead Facebook')
