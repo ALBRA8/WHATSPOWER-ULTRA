@@ -484,7 +484,7 @@ describe('DASHBOARD PARIDAD — integraciones (transporte real)', () => {
       assert.equal(ok.data.ok, true)
       assert.ok(ok.data.latencyMs >= 0)
       await new Promise<void>((r) => stub.close(() => r()))
-      const fail = await api(h, '/api/integrations/transport/test', { method: 'POST', body: { engine: 'daemon', daemonUrl: 'http://127.0.0.1:59999' } })
+      const fail = await api(h, '/api/integrations/transport/test', { method: 'POST', body: { engine: 'daemon', daemonUrl: `http://127.0.0.1:${stubPort}` } })
       assert.equal(fail.status, 200)
       assert.equal(fail.data.ok, false)
       assert.ok(fail.data.error)
