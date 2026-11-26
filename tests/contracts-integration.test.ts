@@ -22,7 +22,10 @@ async function runContractsIntegrationSuite() {
   // TEST 1: Contrato del Daemon CRM (POST /send)
   // --------------------------------------------------------------------------
   {
-    const TEST_DAEMON_PORT = 3991
+    // Puerto EFÍMERO (0): con node --test los archivos corren en paralelo y en
+    // Windows un puerto fijo colisiona con otro proceso o cae dentro de un
+    // rango reservado (EADDRINUSE/EACCES) — hallazgo Antigravity 2026-11-26.
+    let TEST_DAEMON_PORT = 0
     const DAEMON_SECRET = 'test_internal_secret_daemon_min24'
     let lastReceivedBody: any = null
     let daemonState = 'connected'
@@ -73,7 +76,13 @@ async function runContractsIntegrationSuite() {
       }
     })
 
-    await new Promise<void>((r) => daemonMockServer.listen(TEST_DAEMON_PORT, r))
+    await new Promise<void>((r, j) => {
+      daemonMockServer.once('error', j)
+      daemonMockServer.listen(0, '127.0.0.1', () => {
+        TEST_DAEMON_PORT = (daemonMockServer.address() as { port: number }).port
+        r()
+      })
+    })
 
     // El gate DOBLE del contrato §5 exige también ALLOW_REAL_DISPATCH=true en el entorno
     // (salvaguarda física en TODOS los adaptadores; en pruebas se activa solo para el stub).
@@ -83,7 +92,7 @@ async function runContractsIntegrationSuite() {
       const dispatcher = new HttpCrmDaemonDispatcher({
         endpointUrl: `http://localhost:${TEST_DAEMON_PORT}/send`,
         secret: DAEMON_SECRET,
-        allowRealDispatch: true, // Permitir envío al stub mock en puerto 3991
+        allowRealDispatch: true, // Permitir envío al stub mock en puerto efímero
       })
 
       // 1.1 Solicitud exitosa
@@ -140,7 +149,8 @@ async function runContractsIntegrationSuite() {
   // TEST 2: Contrato de Locks y Supresiones con Capa 2A
   // --------------------------------------------------------------------------
   {
-    const TEST_2A_PORT = 3992
+    // Puerto EFÍMERO: misma razón que el TEST 1 (concurrencia de node --test).
+    let TEST_2A_PORT = 0
     const locksStore = new Map<string, { current_state: string }>()
     const suppressionStore = new Set<string>()
     let simulate500 = false
@@ -196,7 +206,13 @@ async function runContractsIntegrationSuite() {
       res.end()
     })
 
-    await new Promise<void>((r) => mock2AServer.listen(TEST_2A_PORT, r))
+    await new Promise<void>((r, j) => {
+      mock2AServer.once('error', j)
+      mock2AServer.listen(0, '127.0.0.1', () => {
+        TEST_2A_PORT = (mock2AServer.address() as { port: number }).port
+        r()
+      })
+    })
 
     // B3: credenciales de servicio POR ORGANIZACIÓN (el global ya no autoriza).
     process.env.WHATSPOWER_ORG_CREDENTIALS = 'org_alpha:cred_org_alpha_integracion_0001,org_beta:cred_org_beta_integracion_0002'
@@ -427,12 +443,19 @@ async function runContractsIntegrationSuite() {
   // TEST 5: Arranque del Servidor 2B en Modo Seguro Aislado
   // --------------------------------------------------------------------------
   {
-    const TEST_SERVER_PORT = 3995
+    // Puerto EFÍMERO: misma razón que los TEST 1 y 2.
+    let TEST_SERVER_PORT = 0
     const { server } = createBroadcastServer({
       dbPath: ':memory:',
     })
 
-    await new Promise<void>((r) => server.listen(TEST_SERVER_PORT, r))
+    await new Promise<void>((r, j) => {
+      server.once('error', j)
+      server.listen(0, '127.0.0.1', () => {
+        TEST_SERVER_PORT = (server.address() as { port: number }).port
+        r()
+      })
+    })
 
     try {
       const healthRes = await fetch(`http://localhost:${TEST_SERVER_PORT}/api/health`)
