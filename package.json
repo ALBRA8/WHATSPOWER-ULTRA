@@ -2,11 +2,13 @@
   "name": "whatspower-ultra",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
   },
   "description": "WHATSPOWER ULTRA (Nivel 3) — Suite de Difusión Masiva, Chat Marketing y Anti-Ban para CRM ALBRA",
+  "copyright": "Copyright (c) 2026 ALBRA",
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
     "worker": "node --experimental-strip-types src/worker-main.ts",
